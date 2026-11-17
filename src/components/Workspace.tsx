@@ -8,6 +8,7 @@ import {
   preloadToolchain,
   ensureToolchain,
 } from '../lib/clangJudge'
+import { PAGES_BUILD } from '../lib/clangJudge'
 import { markSolved } from '../lib/progress'
 
 interface Props {
@@ -118,7 +119,7 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
           </span>
         </div>
         <div className="progress-pill">
-          {toolchainReady ? 'C 工具链就绪' : '正在加载 C 工具链…'}
+          {toolchainReady ? `C 工具链就绪 · ${PAGES_BUILD}` : '正在加载 C 工具链…'}
         </div>
       </header>
 
