@@ -15,4 +15,8 @@ export default defineConfig({
     port: 4173,
     strictPort: true,
   },
+  build: {
+    target: 'esnext',
+    chunkSizeWarningLimit: 1200,
+  },
 })

@@ -18,26 +18,23 @@ export function inferHint(
   error?: string,
 ): string {
   if (error) {
-    if (/NoneType|AttributeError.*None/i.test(error)) {
-      return '空指针问题：访问了 None 的属性。递归前先判断节点是否为空。'
+    if (/null pointer|Segmentation|SIGSEGV|nil/i.test(error)) {
+      return '空指针问题：解引用了 NULL。递归前先判断节点是否为空。'
     }
-    if (/IndexError|list index out of range/i.test(error)) {
-      return '越界：数组/队列下标超出范围，检查 off-by-one 与空层处理。'
-    }
-    if (/RecursionError|maximum recursion/i.test(error)) {
+    if (/stack|overflow|recursion/i.test(error)) {
       return '递归过深或未正确收敛：检查基线条件，是否对空节点仍继续递归。'
     }
-    if (/NameError|is not defined/i.test(error)) {
-      return '名称错误：函数名或变量未定义，请对照题目要求的函数签名。'
+    if (/undefined reference|not declared|implicit declaration/i.test(error)) {
+      return '名称错误：函数名或变量未声明，请对照题目要求的函数签名。'
     }
-    if (/TypeError/i.test(error)) {
-      return '类型错误：参数个数或返回值类型与约定不符。'
+    if (/error:/i.test(error)) {
+      return '编译或类型问题：检查返回值、returnSize 以及指针用法。'
     }
     return `运行出错：${error.split('\n').filter(Boolean).slice(-1)[0] ?? error}`
   }
 
   if (actual === undefined) {
-    return '没有得到返回值：请确认函数有 return，且不要只写 pass。'
+    return '没有得到返回值：请确认函数有 return，数组题需设置 *returnSize。'
   }
 
   if (typeof expected === 'boolean' && typeof actual === 'boolean') {
@@ -59,7 +56,7 @@ export function inferHint(
       return '元素对但顺序不对：遍历次序（前/中/后/层序）写错了。'
     }
     if (actual.length === 0 && expected.length > 0) {
-      return '返回了空列表：可能未真正遍历，或根为 None 时过早返回。'
+      return '返回了空列表：可能未真正遍历，或根为 NULL 时过早返回。'
     }
     return '序列不匹配：对照样例手推一遍遍历/构造过程。'
   }

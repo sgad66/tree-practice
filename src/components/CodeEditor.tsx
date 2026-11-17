@@ -1,5 +1,5 @@
 import CodeMirror from '@uiw/react-codemirror'
-import { python } from '@codemirror/lang-python'
+import { cpp } from '@codemirror/lang-cpp'
 import { oneDark } from '@codemirror/theme-one-dark'
 
 interface Props {
@@ -14,7 +14,7 @@ export function CodeEditor({ value, onChange }: Props) {
         value={value}
         height="100%"
         theme={oneDark}
-        extensions={[python()]}
+        extensions={[cpp()]}
         onChange={onChange}
         basicSetup={{
           lineNumbers: true,

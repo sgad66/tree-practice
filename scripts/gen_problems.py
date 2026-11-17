@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections import deque
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -65,13 +66,136 @@ def dumps_ts(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+# ── C signature helpers ───────────────────────────────────────────────────────
+_TYPE_MAP = {
+    "Optional[TreeNode]": ("struct TreeNode*", "tree"),
+    "TreeNode": ("struct TreeNode*", "tree"),
+    "int": ("int", "int"),
+    "float": ("double", "float"),
+    "bool": ("bool", "bool"),
+    "str": ("char*", "string"),
+    "Optional[int]": ("int*", "optional_int"),
+    "List[int]": ("int*", "int_array"),
+    "List[float]": ("double*", "double_array"),
+    "List[str]": ("char**", "string_array"),
+    "List[List[int]]": ("int**", "int_matrix"),
+    "List[List[str]]": ("char***", "string_matrix"),
+}
+
+
+def _parse_sig(sig: str) -> tuple[list[tuple[str, str, str]], str, str]:
+    """Return (params as (name, c_type, kind), return_c_type, return_kind)."""
+    sig = sig.strip()
+    m = re.match(r"^\((.*)\)\s*->\s*(.+)$", sig)
+    if not m:
+        raise ValueError(f"bad sig: {sig}")
+    params_s, ret_s = m.group(1).strip(), m.group(2).strip()
+    params: list[tuple[str, str, str]] = []
+    if params_s:
+        # split on commas not inside brackets
+        parts: list[str] = []
+        depth = 0
+        cur = []
+        for ch in params_s:
+            if ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+            if ch == "," and depth == 0:
+                parts.append("".join(cur).strip())
+                cur = []
+                continue
+            cur.append(ch)
+        if cur:
+            parts.append("".join(cur).strip())
+        for part in parts:
+            name, typ = [x.strip() for x in part.split(":", 1)]
+            if typ not in _TYPE_MAP:
+                raise ValueError(f"unknown type {typ} in {sig}")
+            c_ty, kind = _TYPE_MAP[typ]
+            params.append((name, c_ty, kind))
+    if ret_s not in _TYPE_MAP:
+        raise ValueError(f"unknown return type {ret_s} in {sig}")
+    ret_c, ret_kind = _TYPE_MAP[ret_s]
+    return params, ret_c, ret_kind
+
+
+def analyze_c_abi(sig: str) -> dict:
+    params, _ret_c, ret_kind = _parse_sig(sig)
+    return {
+        "params": [{"name": n, "kind": k} for n, _c, k in params],
+        "returnKind": ret_kind,
+    }
+
+
 def starter(fn: str, sig: str, comment: str) -> str:
-    return (
-        "from typing import Optional, List\n\n"
-        f"def {fn}{sig}:\n"
-        f"    # {comment}\n"
-        "    pass\n"
-    )
+    """Emit a LeetCode-style C starter from a Python-like signature string."""
+    if fn == "serialize":
+        # special-cased in extend_catalog; fallback prototype pair
+        return (
+            "/* TreeNode 由判题环境提供 */\n"
+            "char* serialize(struct TreeNode* root) {\n"
+            "    // 序列化\n"
+            "    return NULL;\n"
+            "}\n\n"
+            "struct TreeNode* deserialize(char* data) {\n"
+            "    // 反序列化\n"
+            "    return NULL;\n"
+            "}\n"
+        )
+
+    params, ret_c, ret_kind = _parse_sig(sig)
+    c_params: list[str] = []
+    for name, c_ty, kind in params:
+        c_params.append(f"{c_ty} {name}")
+        if kind in ("int_array", "double_array", "string_array"):
+            c_params.append(f"int {name}Size")
+        elif kind in ("int_matrix", "string_matrix"):
+            c_params.append(f"int {name}Size")
+            c_params.append(f"int* {name}ColSize")
+
+    out_notes: list[str] = []
+    if ret_kind in ("int_array", "double_array", "string_array"):
+        c_params.append("int* returnSize")
+        out_notes.append("返回的数组需 malloc；通过 returnSize 写出长度。")
+    elif ret_kind in ("int_matrix", "string_matrix"):
+        c_params.append("int* returnSize")
+        c_params.append("int** returnColumnSizes")
+        out_notes.append("返回的二维数组需 malloc；returnSize 为行数，returnColumnSizes 为每行长度。")
+    elif ret_kind == "optional_int":
+        out_notes.append("无结果时返回 NULL；有结果时返回 malloc 的单个 int。")
+    elif ret_kind == "string":
+        out_notes.append("返回的字符串需 malloc（或返回静态/字面量时请确保生命周期足够）。")
+
+    needs_stdbool = ret_kind == "bool" or any(k == "bool" for _n, _c, k in params)
+    headers = ["/* TreeNode 由判题环境提供：", " * struct TreeNode { int val; struct TreeNode *left; struct TreeNode *right; };", " */"]
+    if needs_stdbool:
+        headers.insert(0, "#include <stdbool.h>")
+    for note in out_notes:
+        headers.append(f"/* {note} */")
+
+    body_lines = [f"    // {comment}"]
+    if ret_kind == "bool":
+        body_lines.append("    return false;")
+    elif ret_kind in ("int", "float"):
+        body_lines.append("    return 0;")
+    elif ret_kind == "tree":
+        body_lines.append("    return NULL;")
+    elif ret_kind == "optional_int":
+        body_lines.append("    return NULL;")
+    elif ret_kind == "string":
+        body_lines.append("    return NULL;")
+    elif ret_kind in ("int_array", "double_array", "string_array"):
+        body_lines.append("    *returnSize = 0;")
+        body_lines.append("    return NULL;")
+    elif ret_kind in ("int_matrix", "string_matrix"):
+        body_lines.append("    *returnSize = 0;")
+        body_lines.append("    return NULL;")
+    else:
+        body_lines.append("    return 0;")
+
+    proto = f"{ret_c} {fn}({', '.join(c_params)})"
+    return "\n".join(headers) + "\n" + proto + " {\n" + "\n".join(body_lines) + "\n}\n"
 
 
 DEFAULT_CONSTRAINTS = [
@@ -1544,6 +1668,11 @@ def P(
         "functionName": fn_name,
         "starterCode": starter(fn_name, sig, comment),
         "judgeMode": mode,
+        "cAbi": (
+            {"params": [], "returnKind": "serialize"}
+            if mode == "serialize"
+            else analyze_c_abi(sig)
+        ),
         "harnessExtras": harness,
         "ref": ref,
         "tests_raw": tests,
@@ -2751,20 +2880,20 @@ def extend_catalog(C: list[ProblemDef]) -> list[ProblemDef]:
 
             p["ref"] = flatten_ref
 
-    # Fix serialize starter
+    # Fix serialize starter (C codec pair)
     for p in C:
         if p["id"] == "serialize":
+            p["cAbi"] = {"params": [{"name": "root", "kind": "tree"}], "returnKind": "serialize"}
             p["starterCode"] = (
-                "from typing import Optional\n\n"
-                "class Codec:\n"
-                "    def serialize(self, root: Optional[TreeNode]) -> str:\n"
-                "        pass\n\n"
-                "    def deserialize(self, data: str) -> Optional[TreeNode]:\n"
-                "        pass\n\n"
-                "def serialize(root: Optional[TreeNode]) -> str:\n"
-                "    return Codec().serialize(root)\n\n"
-                "def deserialize(data: str) -> Optional[TreeNode]:\n"
-                "    return Codec().deserialize(data)\n"
+                "/* TreeNode 由判题环境提供 */\n"
+                "char* serialize(struct TreeNode* root) {\n"
+                "    // 序列化为字符串\n"
+                "    return NULL;\n"
+                "}\n\n"
+                "struct TreeNode* deserialize(char* data) {\n"
+                "    // 从字符串还原\n"
+                "    return NULL;\n"
+                "}\n"
             )
 
     # ========== 6. LCA (12) ==========
@@ -3464,6 +3593,12 @@ def materialize(prob: ProblemDef) -> dict:
         "functionName": prob["functionName"],
         "starterCode": prob["starterCode"],
         "judgeMode": prob["judgeMode"],
+        "cAbi": prob.get("cAbi")
+        or (
+            {"params": [], "returnKind": "serialize"}
+            if prob["judgeMode"] == "serialize"
+            else {"params": [{"name": "root", "kind": "tree"}], "returnKind": "int"}
+        ),
         "tests": tests,
     }
     if prob.get("harnessExtras"):
@@ -3498,6 +3633,7 @@ def emit_ts_module(topic_id: str, problems: list[dict]) -> str:
             "functionName",
             "starterCode",
             "judgeMode",
+            "cAbi",
             "harnessExtras",
             "tests",
         ]:

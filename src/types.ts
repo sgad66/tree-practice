@@ -10,7 +10,7 @@ export type TopicId =
   | 'levelview'
   | 'advanced'
 
-/** How the Pyodide harness prepares args / compares results. */
+/** How the in-browser C harness prepares args / compares results. */
 export type JudgeMode =
   | 'value' // first list-looking arg → tree; compare JSON value
   | 'trees' // every list-looking arg → tree; compare JSON value
@@ -20,6 +20,28 @@ export type JudgeMode =
   | 'raw_tree_return' // keep arrays; return TreeNode → list
   | 'lca' // (tree, pVal, qVal) → return node.val
   | 'serialize' // round-trip serialize/deserialize
+
+export type CParamKind =
+  | 'tree'
+  | 'int'
+  | 'float'
+  | 'bool'
+  | 'string'
+  | 'optional_int'
+  | 'int_array'
+  | 'double_array'
+  | 'string_array'
+  | 'int_matrix'
+  | 'string_matrix'
+
+export type CReturnKind =
+  | CParamKind
+  | 'serialize'
+
+export interface CAbi {
+  params: { name: string; kind: CParamKind }[]
+  returnKind: CReturnKind
+}
 
 export interface Topic {
   id: TopicId
@@ -59,12 +81,14 @@ export interface Problem {
   statement: string
   examples: { input: string; output: string; explanation?: string }[]
   constraints: string[]
-  /** Python function name the user must implement */
+  /** C function name the user must implement */
   functionName: string
   starterCode: string
-  /** Extra Python helpers injected before user code (TreeNode etc. always injected) */
+  /** Extra C helpers injected before user code (rare) */
   harnessExtras?: string
   judgeMode?: JudgeMode
+  /** Structured C ABI for the judge harness */
+  cAbi: CAbi
   tests: TestCase[]
 }
 
