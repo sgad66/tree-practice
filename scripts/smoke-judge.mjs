@@ -2,15 +2,27 @@ import puppeteer from 'puppeteer-core'
 
 const BASE = process.env.APP_URL || 'http://127.0.0.1:5173'
 
-const BAD = `#include <stdlib.h>
+/** Extract starter helpers + main from page, inject solution body. */
+function wrapSolution(starter, solutionFnSrc) {
+  // Replace from "/* ===== 解题区" through the closing brace before main comment
+  const startMark = '/* ===== 解题区'
+  const mainMark = '/* ===== main'
+  const i = starter.indexOf(startMark)
+  const j = starter.indexOf(mainMark)
+  if (i < 0 || j < 0) {
+    throw new Error('starter missing solution/main markers')
+  }
+  return starter.slice(0, i) + solutionFnSrc.trim() + '\n\n' + starter.slice(j)
+}
 
+const BAD_FN = `/* ===== 解题区：错误解（中序） ===== */
+#include <stdlib.h>
 static void bad_walk(struct TreeNode* node, int* out, int* n, int cap) {
     if (!node) return;
     bad_walk(node->left, out, n, cap);
     if (*n < cap) out[(*n)++] = node->val;
     bad_walk(node->right, out, n, cap);
 }
-
 int* preorderTraversal(struct TreeNode* root, int* returnSize) {
     int cap = 128;
     int* out = (int*)malloc(sizeof(int) * (size_t)cap);
@@ -21,8 +33,8 @@ int* preorderTraversal(struct TreeNode* root, int* returnSize) {
 }
 `
 
-const GOOD = `#include <stdlib.h>
-
+const GOOD_FN = `/* ===== 解题区：正确前序 ===== */
+#include <stdlib.h>
 static void good_walk(struct TreeNode* node, int* out, int* n, int cap) {
     if (!node) return;
     if (*n >= cap) return;
@@ -30,7 +42,6 @@ static void good_walk(struct TreeNode* node, int* out, int* n, int cap) {
     good_walk(node->left, out, n, cap);
     good_walk(node->right, out, n, cap);
 }
-
 int* preorderTraversal(struct TreeNode* root, int* returnSize) {
     int cap = 128;
     int* out = (int*)malloc(sizeof(int) * (size_t)cap);
@@ -55,8 +66,12 @@ page.on('pageerror', (err) => console.log('pageerror:', err.message))
 await page.goto(BASE, { waitUntil: 'networkidle2' })
 
 const landing = await page.evaluate(() => document.body.innerText)
-if (!/C\s*语言|写 C|C语言/.test(landing)) {
-  console.warn('Landing may not mention C:', landing.slice(0, 300))
+if (!/完整 C 程序|含 main|C\s*语言|C语言/.test(landing)) {
+  console.warn('Landing may not mention full C program:', landing.slice(0, 400))
+}
+if (/不要.*main|勿定义 main|不要在解法中定义/.test(landing)) {
+  console.error('FAIL: landing still says do not define main')
+  process.exitCode = 1
 }
 
 await page.click('button.btn--primary')
@@ -70,6 +85,7 @@ const layout = await page.evaluate(() => {
   const practice = document.querySelector('.practice')
   const editor = document.querySelector('.cm-wrapper')
   const ws = document.querySelector('.workspace')
+  const body = document.body.innerText
   if (!practice || !editor || !ws) return null
   const pr = practice.getBoundingClientRect()
   const er = editor.getBoundingClientRect()
@@ -78,6 +94,8 @@ const layout = await page.evaluate(() => {
     viewportH: window.innerHeight,
     editorH: er.height,
     toolbar: document.querySelector('.editor-toolbar__lang')?.textContent || '',
+    hasFullProgCallout: /请编写完整 C 程序（含 main）/.test(body),
+    hasFunctionOnly: /不要.*写 main|勿定义 main|只实现函数/.test(body),
   }
 })
 console.log('layout', layout)
@@ -85,14 +103,29 @@ if (!layout || layout.editorH < 160) {
   console.error('FAIL: editor too small / layout missing', layout)
   process.exitCode = 1
 }
-if (!layout?.toolbar.includes('C')) {
-  console.error('FAIL: toolbar not C', layout?.toolbar)
+if (!layout?.toolbar.includes('C') || !layout?.toolbar.includes('完整程序')) {
+  console.error('FAIL: toolbar not full-program C', layout?.toolbar)
+  process.exitCode = 1
+}
+if (!layout?.hasFullProgCallout) {
+  console.error('FAIL: missing 请编写完整 C 程序 callout')
+  process.exitCode = 1
+}
+if (layout?.hasFunctionOnly) {
+  console.error('FAIL: still shows function-only UX')
   process.exitCode = 1
 }
 if (Math.abs(layout.practiceH - layout.viewportH) > 12) {
   console.error('FAIL: practice not filling viewport', layout.practiceH, layout.viewportH)
   process.exitCode = 1
 }
+
+const starter = await page.evaluate(() => window.__treePractice.getCode())
+if (!starter.includes('int main') || !starter.includes('struct TreeNode')) {
+  console.error('FAIL: starter is not a full C program')
+  process.exitCode = 1
+}
+console.log('starter ok, length', starter.length)
 
 console.log('ready')
 
@@ -108,8 +141,8 @@ async function run(code, label) {
   return result
 }
 
-const bad = await run(BAD, 'BAD')
-const good = await run(GOOD, 'GOOD')
+const bad = await run(wrapSolution(starter, BAD_FN), 'BAD')
+const good = await run(wrapSolution(starter, GOOD_FN), 'GOOD')
 
 const badActual = bad?.cases?.[0]?.actual
 if (bad?.compileError) {

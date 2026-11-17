@@ -30,7 +30,7 @@ export function TestResults({ result, running, toolchainReady }: Props) {
       <div className="results">
         <div className="toolchain-banner">
           {toolchainReady
-            ? '编写 C 解法后点击「提交」。失败时会标出具体用例、期望与实际，并给出简短提示。'
+            ? '请编写完整 C 程序（含 main）后点击「提交」。每个用例经 stdin 注入，比较 stdout；失败时标出期望与实际。'
             : '首次加载会拉取浏览器内 C 工具链（约数十 MB），稍候即可提交。'}
         </div>
       </div>

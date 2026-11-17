@@ -128,80 +128,547 @@ def analyze_c_abi(sig: str) -> dict:
     }
 
 
-def starter(fn: str, sig: str, comment: str) -> str:
-    """Emit a LeetCode-style C starter from a Python-like signature string."""
-    if fn == "serialize":
-        # special-cased in extend_catalog; fallback prototype pair
+IO_NOTE = (
+    "【编写说明】请编写完整 C 程序（含 main）。判题编译并运行你的整份程序："
+    "每个用例经 stdin 注入输入，比较 stdout 与期望。\n"
+    "【输入格式】stdin，每个参数一行："
+    "树为层序数组如 [3,9,20,null,null,15,7]（空树 []）；"
+    "整数/浮点/布尔各占一行（布尔 true/false）；"
+    "一维数组 [1,2,3]；二维数组 [[1,2],[3,4]]；字符串一行原文。\n"
+    "【输出格式】stdout 一行：整数、true/false、层序数组，或 JSON 风格数组/字符串（与示例一致）。"
+)
+
+DEFAULT_CONSTRAINTS = [
+    "请编写完整 C 程序（含 main）；不要依赖判题替你写入口",
+    "节点数目范围见题面；请注意空树与单节点边界",
+    "如无特别说明，节点值范围为合理整数",
+]
+
+# Shared helpers embedded in every starter (full-program mode).
+STARTER_PREAMBLE = r'''#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <ctype.h>
+#include <math.h>
+#include <limits.h>
+
+struct TreeNode {
+    int val;
+    struct TreeNode *left;
+    struct TreeNode *right;
+};
+
+#define TP_LINE_MAX 65536
+#define TP_NODE_MAX 4096
+
+static char tp_line[TP_LINE_MAX];
+
+static int tp_read_line(char *buf, int cap) {
+    if (!fgets(buf, cap, stdin)) {
+        if (cap > 0) buf[0] = '\0';
+        return 0;
+    }
+    size_t n = strlen(buf);
+    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) buf[--n] = '\0';
+    return 1;
+}
+
+static struct TreeNode *tp_new(int v) {
+    struct TreeNode *n = (struct TreeNode *)malloc(sizeof(struct TreeNode));
+    n->val = v;
+    n->left = NULL;
+    n->right = NULL;
+    return n;
+}
+
+static struct TreeNode *tp_build_tree(int *vals, int *nulls, int len) {
+    if (len <= 0) return NULL;
+    struct TreeNode **nodes = (struct TreeNode **)calloc((size_t)len, sizeof(struct TreeNode *));
+    for (int i = 0; i < len; i++) {
+        if (nulls[i]) nodes[i] = NULL;
+        else nodes[i] = tp_new(vals[i]);
+    }
+    int kids = 1;
+    for (int i = 0; i < len; i++) {
+        if (!nodes[i]) continue;
+        if (kids < len) { nodes[i]->left = nodes[kids]; kids++; }
+        if (kids < len) { nodes[i]->right = nodes[kids]; kids++; }
+    }
+    struct TreeNode *root = nodes[0];
+    free(nodes);
+    return root;
+}
+
+static struct TreeNode *tp_parse_tree(const char *s) {
+    while (*s && isspace((unsigned char)*s)) s++;
+    if (*s != '[') return NULL;
+    s++;
+    int vals[TP_NODE_MAX];
+    int nulls[TP_NODE_MAX];
+    int n = 0;
+    while (*s && *s != ']') {
+        while (*s && isspace((unsigned char)*s)) s++;
+        if (*s == ']') break;
+        if (n >= TP_NODE_MAX) break;
+        if ((s[0] == 'n' || s[0] == 'N') && strncmp(s, "null", 4) == 0) {
+            vals[n] = 0; nulls[n] = 1; n++;
+            s += 4;
+        } else {
+            char *end = NULL;
+            long v = strtol(s, &end, 10);
+            vals[n] = (int)v; nulls[n] = 0; n++;
+            s = end ? end : s;
+        }
+        while (*s && isspace((unsigned char)*s)) s++;
+        if (*s == ',') s++;
+    }
+    return tp_build_tree(vals, nulls, n);
+}
+
+static struct TreeNode *tp_read_tree(void) {
+    if (!tp_read_line(tp_line, TP_LINE_MAX)) return NULL;
+    return tp_parse_tree(tp_line);
+}
+
+static int tp_read_int(void) {
+    if (!tp_read_line(tp_line, TP_LINE_MAX)) return 0;
+    return (int)strtol(tp_line, NULL, 10);
+}
+
+static double tp_read_double(void) {
+    if (!tp_read_line(tp_line, TP_LINE_MAX)) return 0.0;
+    return strtod(tp_line, NULL);
+}
+
+static bool tp_read_bool(void) {
+    if (!tp_read_line(tp_line, TP_LINE_MAX)) return false;
+    return tp_line[0] == 't' || tp_line[0] == 'T' || strcmp(tp_line, "1") == 0;
+}
+
+static char *tp_read_string(void) {
+    if (!tp_read_line(tp_line, TP_LINE_MAX)) {
+        char *e = (char *)malloc(1);
+        e[0] = '\0';
+        return e;
+    }
+    size_t n = strlen(tp_line);
+    char *out = (char *)malloc(n + 1);
+    memcpy(out, tp_line, n + 1);
+    return out;
+}
+
+static int *tp_parse_int_array(const char *s, int *out_len) {
+    *out_len = 0;
+    while (*s && isspace((unsigned char)*s)) s++;
+    if (*s != '[') return NULL;
+    s++;
+    int *buf = (int *)malloc(sizeof(int) * TP_NODE_MAX);
+    int n = 0;
+    while (*s && *s != ']') {
+        while (*s && isspace((unsigned char)*s)) s++;
+        if (*s == ']') break;
+        char *end = NULL;
+        long v = strtol(s, &end, 10);
+        if (n < TP_NODE_MAX) buf[n++] = (int)v;
+        s = end ? end : s;
+        while (*s && isspace((unsigned char)*s)) s++;
+        if (*s == ',') s++;
+    }
+    *out_len = n;
+    return buf;
+}
+
+static int *tp_read_int_array(int *out_len) {
+    if (!tp_read_line(tp_line, TP_LINE_MAX)) { *out_len = 0; return NULL; }
+    return tp_parse_int_array(tp_line, out_len);
+}
+
+static double *tp_read_double_array(int *out_len) {
+    if (!tp_read_line(tp_line, TP_LINE_MAX)) { *out_len = 0; return NULL; }
+    const char *s = tp_line;
+    while (*s && isspace((unsigned char)*s)) s++;
+    if (*s != '[') { *out_len = 0; return NULL; }
+    s++;
+    double *buf = (double *)malloc(sizeof(double) * TP_NODE_MAX);
+    int n = 0;
+    while (*s && *s != ']') {
+        while (*s && isspace((unsigned char)*s)) s++;
+        if (*s == ']') break;
+        char *end = NULL;
+        double v = strtod(s, &end);
+        if (n < TP_NODE_MAX) buf[n++] = v;
+        s = end ? end : s;
+        while (*s && isspace((unsigned char)*s)) s++;
+        if (*s == ',') s++;
+    }
+    *out_len = n;
+    return buf;
+}
+
+static int **tp_read_int_matrix(int *out_rows, int **out_cols) {
+    if (!tp_read_line(tp_line, TP_LINE_MAX)) { *out_rows = 0; *out_cols = NULL; return NULL; }
+    const char *s = tp_line;
+    while (*s && isspace((unsigned char)*s)) s++;
+    if (*s != '[') { *out_rows = 0; *out_cols = NULL; return NULL; }
+    s++;
+    int **rows = (int **)malloc(sizeof(int *) * TP_NODE_MAX);
+    int *cols = (int *)malloc(sizeof(int) * TP_NODE_MAX);
+    int r = 0;
+    while (*s && *s != ']') {
+        while (*s && isspace((unsigned char)*s)) s++;
+        if (*s == ']') break;
+        if (*s != '[') break;
+        const char *row_start = s;
+        int depth = 0;
+        const char *p = s;
+        for (; *p; p++) {
+            if (*p == '[') depth++;
+            else if (*p == ']') {
+                depth--;
+                if (depth == 0) { p++; break; }
+            }
+        }
+        /* temporary NUL-terminate row slice for parser */
+        char saved = tp_line[p - tp_line];
+        ((char *)p)[0] = '\0';
+        int len = 0;
+        int *row = tp_parse_int_array(row_start, &len);
+        ((char *)p)[0] = saved;
+        s = p;
+        while (*s && isspace((unsigned char)*s)) s++;
+        if (*s == ',') s++;
+        rows[r] = row;
+        cols[r] = len;
+        r++;
+        if (r >= TP_NODE_MAX) break;
+    }
+    *out_rows = r;
+    *out_cols = cols;
+    return rows;
+}
+
+static struct TreeNode *tp_find_node(struct TreeNode *root, int val) {
+    if (!root) return NULL;
+    if (root->val == val) return root;
+    struct TreeNode *L = tp_find_node(root->left, val);
+    if (L) return L;
+    return tp_find_node(root->right, val);
+}
+
+static void tp_print_string(const char *s) {
+    if (!s) { printf("null"); return; }
+    putchar('"');
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
+        unsigned char c = *p;
+        if (c == '"' || c == '\\') { putchar('\\'); putchar((char)c); }
+        else if (c == '\n') { putchar('\\'); putchar('n'); }
+        else putchar((char)c);
+    }
+    putchar('"');
+}
+
+static void tp_print_int_array(int *a, int n) {
+    putchar('[');
+    for (int i = 0; i < n; i++) {
+        if (i) putchar(',');
+        printf("%d", a[i]);
+    }
+    putchar(']');
+}
+
+static void tp_print_double_array(double *a, int n) {
+    putchar('[');
+    for (int i = 0; i < n; i++) {
+        if (i) putchar(',');
+        printf("%.10g", a[i]);
+    }
+    putchar(']');
+}
+
+static void tp_print_string_array(char **a, int n) {
+    putchar('[');
+    for (int i = 0; i < n; i++) {
+        if (i) putchar(',');
+        tp_print_string(a ? a[i] : NULL);
+    }
+    putchar(']');
+}
+
+static void tp_print_int_matrix(int **a, int rows, int *cols) {
+    putchar('[');
+    for (int i = 0; i < rows; i++) {
+        if (i) putchar(',');
+        tp_print_int_array(a ? a[i] : NULL, cols ? cols[i] : 0);
+    }
+    putchar(']');
+}
+
+static void tp_print_string_matrix(char ***a, int rows, int *cols) {
+    putchar('[');
+    for (int r = 0; r < rows; r++) {
+        if (r) putchar(',');
+        putchar('[');
+        int cmax = cols ? cols[r] : 0;
+        for (int c = 0; c < cmax; c++) {
+            if (c) putchar(',');
+            tp_print_string(a && a[r] ? a[r][c] : NULL);
+        }
+        putchar(']');
+    }
+    putchar(']');
+}
+
+static void tp_print_tree(struct TreeNode *root) {
+    if (!root) { printf("[]"); return; }
+    struct TreeNode **q = (struct TreeNode **)malloc(sizeof(struct TreeNode *) * TP_NODE_MAX);
+    int *out_vals = (int *)malloc(sizeof(int) * TP_NODE_MAX);
+    int *out_null = (int *)malloc(sizeof(int) * TP_NODE_MAX);
+    int qh = 0, qt = 0, on = 0;
+    q[qt++] = root;
+    while (qh < qt) {
+        struct TreeNode *n = q[qh++];
+        if (!n) {
+            out_vals[on] = 0; out_null[on] = 1; on++;
+        } else {
+            out_vals[on] = n->val; out_null[on] = 0; on++;
+            if (qt < TP_NODE_MAX - 2) { q[qt++] = n->left; q[qt++] = n->right; }
+        }
+    }
+    while (on > 0 && out_null[on - 1]) on--;
+    putchar('[');
+    for (int i = 0; i < on; i++) {
+        if (i) putchar(',');
+        if (out_null[i]) printf("null");
+        else printf("%d", out_vals[i]);
+    }
+    putchar(']');
+    free(q); free(out_vals); free(out_null);
+}
+
+'''
+
+
+def _solution_stub(fn: str, sig: str, comment: str, mode: str) -> str:
+    """Emit solution function stub(s) the student fills in."""
+    if mode == "serialize" or fn == "serialize":
         return (
-            "/* TreeNode 由判题环境提供 */\n"
+            "/* ===== 解题区：实现 serialize / deserialize ===== */\n"
             "char* serialize(struct TreeNode* root) {\n"
-            "    // 序列化\n"
+            "    // 序列化为字符串\n"
+            "    (void)root;\n"
             "    return NULL;\n"
             "}\n\n"
             "struct TreeNode* deserialize(char* data) {\n"
-            "    // 反序列化\n"
+            "    // 从字符串还原\n"
+            "    (void)data;\n"
             "    return NULL;\n"
             "}\n"
         )
 
     params, ret_c, ret_kind = _parse_sig(sig)
     c_params: list[str] = []
+    unused: list[str] = []
     for name, c_ty, kind in params:
         c_params.append(f"{c_ty} {name}")
+        unused.append(name)
         if kind in ("int_array", "double_array", "string_array"):
             c_params.append(f"int {name}Size")
+            unused.append(f"{name}Size")
         elif kind in ("int_matrix", "string_matrix"):
             c_params.append(f"int {name}Size")
             c_params.append(f"int* {name}ColSize")
+            unused.append(f"{name}Size")
+            unused.append(f"{name}ColSize")
 
-    out_notes: list[str] = []
+    notes: list[str] = []
     if ret_kind in ("int_array", "double_array", "string_array"):
         c_params.append("int* returnSize")
-        out_notes.append("返回的数组需 malloc；通过 returnSize 写出长度。")
+        unused.append("returnSize")
+        notes.append("/* 返回数组需 malloc；通过 returnSize 写出长度 */")
     elif ret_kind in ("int_matrix", "string_matrix"):
         c_params.append("int* returnSize")
         c_params.append("int** returnColumnSizes")
-        out_notes.append("返回的二维数组需 malloc；returnSize 为行数，returnColumnSizes 为每行长度。")
+        unused.append("returnSize")
+        unused.append("returnColumnSizes")
+        notes.append("/* 返回二维数组需 malloc；returnSize 行数，returnColumnSizes 每行长度 */")
     elif ret_kind == "optional_int":
-        out_notes.append("无结果时返回 NULL；有结果时返回 malloc 的单个 int。")
+        notes.append("/* 无结果返回 NULL；有结果返回 malloc 的单个 int */")
     elif ret_kind == "string":
-        out_notes.append("返回的字符串需 malloc（或返回静态/字面量时请确保生命周期足够）。")
+        notes.append("/* 返回字符串需 malloc（或保证生命周期足够） */")
 
-    needs_stdbool = ret_kind == "bool" or any(k == "bool" for _n, _c, k in params)
-    headers = ["/* TreeNode 由判题环境提供：", " * struct TreeNode { int val; struct TreeNode *left; struct TreeNode *right; };", " */"]
-    if needs_stdbool:
-        headers.insert(0, "#include <stdbool.h>")
-    for note in out_notes:
-        headers.append(f"/* {note} */")
-
-    body_lines = [f"    // {comment}"]
+    body = [f"    // {comment}"]
+    for u in unused:
+        body.append(f"    (void){u};")
     if ret_kind == "bool":
-        body_lines.append("    return false;")
+        body.append("    return false;")
     elif ret_kind in ("int", "float"):
-        body_lines.append("    return 0;")
-    elif ret_kind == "tree":
-        body_lines.append("    return NULL;")
-    elif ret_kind == "optional_int":
-        body_lines.append("    return NULL;")
-    elif ret_kind == "string":
-        body_lines.append("    return NULL;")
+        body.append("    return 0;")
+    elif ret_kind in ("tree", "optional_int", "string"):
+        body.append("    return NULL;")
     elif ret_kind in ("int_array", "double_array", "string_array"):
-        body_lines.append("    *returnSize = 0;")
-        body_lines.append("    return NULL;")
+        body.append("    *returnSize = 0;")
+        body.append("    return NULL;")
     elif ret_kind in ("int_matrix", "string_matrix"):
-        body_lines.append("    *returnSize = 0;")
-        body_lines.append("    return NULL;")
+        body.append("    *returnSize = 0;")
+        body.append("    return NULL;")
     else:
-        body_lines.append("    return 0;")
+        body.append("    return 0;")
 
+    lines = ["/* ===== 解题区：实现下方函数 ===== */"]
+    lines.extend(notes)
     proto = f"{ret_c} {fn}({', '.join(c_params)})"
-    return "\n".join(headers) + "\n" + proto + " {\n" + "\n".join(body_lines) + "\n}\n"
+    lines.append(proto + " {")
+    lines.extend(body)
+    lines.append("}")
+    return "\n".join(lines) + "\n"
 
 
-DEFAULT_CONSTRAINTS = [
-    "节点数目范围见题面；请注意空树与单节点边界",
-    "如无特别说明，节点值范围为合理整数",
-]
+def _emit_read_param(name: str, kind: str) -> tuple[list[str], list[str]]:
+    """Return (decl_lines, call_arg_exprs) for reading one ABI param from stdin."""
+    decls: list[str] = []
+    args: list[str] = []
+    if kind == "tree":
+        decls.append(f"    struct TreeNode* {name} = tp_read_tree();")
+        args.append(name)
+    elif kind == "int":
+        decls.append(f"    int {name} = tp_read_int();")
+        args.append(name)
+    elif kind == "float":
+        decls.append(f"    double {name} = tp_read_double();")
+        args.append(name)
+    elif kind == "bool":
+        decls.append(f"    bool {name} = tp_read_bool();")
+        args.append(name)
+    elif kind == "string":
+        decls.append(f"    char* {name} = tp_read_string();")
+        args.append(name)
+    elif kind == "int_array":
+        decls.append(f"    int {name}Size = 0;")
+        decls.append(f"    int* {name} = tp_read_int_array(&{name}Size);")
+        args.extend([name, f"{name}Size"])
+    elif kind == "double_array":
+        decls.append(f"    int {name}Size = 0;")
+        decls.append(f"    double* {name} = tp_read_double_array(&{name}Size);")
+        args.extend([name, f"{name}Size"])
+    elif kind == "int_matrix":
+        decls.append(f"    int {name}Size = 0;")
+        decls.append(f"    int* {name}ColSize = NULL;")
+        decls.append(f"    int** {name} = tp_read_int_matrix(&{name}Size, &{name}ColSize);")
+        args.extend([name, f"{name}Size", f"{name}ColSize"])
+    else:
+        decls.append(f"    /* unsupported kind {kind} for {name} */")
+        args.append("0")
+    return decls, args
+
+
+def _emit_main(fn: str, sig: str, mode: str) -> str:
+    """Emit main() that reads stdin per ABI and prints the answer."""
+    if mode == "serialize" or fn == "serialize":
+        return (
+            "int main(void) {\n"
+            "    struct TreeNode* root = tp_read_tree();\n"
+            "    char* s = serialize(root);\n"
+            "    struct TreeNode* back = deserialize(s);\n"
+            "    tp_print_tree(back);\n"
+            "    putchar('\\n');\n"
+            "    return 0;\n"
+            "}\n"
+        )
+
+    params, _ret_c, ret_kind = _parse_sig(sig)
+    lines = ["int main(void) {"]
+
+    if mode == "lca":
+        # stdin: tree, pVal, qVal — find nodes then call
+        lines.append("    struct TreeNode* root = tp_read_tree();")
+        lines.append("    int pVal = tp_read_int();")
+        lines.append("    int qVal = tp_read_int();")
+        lines.append("    struct TreeNode* p = tp_find_node(root, pVal);")
+        lines.append("    struct TreeNode* q = tp_find_node(root, qVal);")
+        lines.append(f"    struct TreeNode* res = {fn}(root, p, q);")
+        lines.append('    if (res) printf("%d\\n", res->val); else printf("null\\n");')
+        lines.append("    return 0;")
+        lines.append("}")
+        return "\n".join(lines) + "\n"
+
+    call_args: list[str] = []
+    for name, _c_ty, kind in params:
+        decls, args = _emit_read_param(name, kind)
+        lines.extend(decls)
+        call_args.extend(args)
+
+    if ret_kind in ("int_array", "double_array", "string_array"):
+        lines.append("    int returnSize = 0;")
+        call_args.append("&returnSize")
+        decl = {
+            "int_array": f"    int* res = {fn}({', '.join(call_args)});",
+            "double_array": f"    double* res = {fn}({', '.join(call_args)});",
+            "string_array": f"    char** res = {fn}({', '.join(call_args)});",
+        }[ret_kind]
+        lines.append(decl)
+        printer = {
+            "int_array": "tp_print_int_array(res, returnSize);",
+            "double_array": "tp_print_double_array(res, returnSize);",
+            "string_array": "tp_print_string_array(res, returnSize);",
+        }[ret_kind]
+        lines.append(f"    {printer}")
+        lines.append("    putchar('\\n');")
+    elif ret_kind in ("int_matrix", "string_matrix"):
+        lines.append("    int returnSize = 0;")
+        lines.append("    int* returnColumnSizes = NULL;")
+        call_args.extend(["&returnSize", "&returnColumnSizes"])
+        if ret_kind == "int_matrix":
+            lines.append(f"    int** res = {fn}({', '.join(call_args)});")
+            lines.append("    tp_print_int_matrix(res, returnSize, returnColumnSizes);")
+        else:
+            lines.append(f"    char*** res = {fn}({', '.join(call_args)});")
+            lines.append("    tp_print_string_matrix(res, returnSize, returnColumnSizes);")
+        lines.append("    putchar('\\n');")
+    elif ret_kind == "tree" or mode in ("tree_return", "trees_return", "raw_tree_return"):
+        lines.append(f"    struct TreeNode* res = {fn}({', '.join(call_args)});")
+        lines.append("    tp_print_tree(res);")
+        lines.append("    putchar('\\n');")
+    elif ret_kind == "bool":
+        lines.append(f"    bool res = {fn}({', '.join(call_args)});")
+        lines.append('    printf(res ? "true\\n" : "false\\n");')
+    elif ret_kind == "int":
+        lines.append(f"    int res = {fn}({', '.join(call_args)});")
+        lines.append('    printf("%d\\n", res);')
+    elif ret_kind == "float":
+        lines.append(f"    double res = {fn}({', '.join(call_args)});")
+        lines.append('    printf("%.10g\\n", res);')
+    elif ret_kind == "string":
+        lines.append(f"    char* res = {fn}({', '.join(call_args)});")
+        lines.append("    tp_print_string(res);")
+        lines.append("    putchar('\\n');")
+    elif ret_kind == "optional_int":
+        lines.append(f"    int* res = {fn}({', '.join(call_args)});")
+        lines.append('    if (res) printf("%d\\n", *res); else printf("null\\n");')
+    else:
+        lines.append(f"    /* unsupported return */ (void){fn};")
+        lines.append('    printf("null\\n");')
+
+    lines.append("    return 0;")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def starter(fn: str, sig: str, comment: str, mode: str = "value") -> str:
+    """Emit a full C program skeleton: helpers + solution stub + main."""
+    parts = [
+        "/* 枝径 TreePath — 请编写完整 C 程序（含 main） */",
+        "/* I/O：stdin 每参数一行；树为层序 [1,2,null,3]；stdout 一行答案 */",
+        STARTER_PREAMBLE.rstrip(),
+        "",
+        _solution_stub(fn, sig, comment, mode).rstrip(),
+        "",
+        "/* ===== main：读入测试输入并打印答案（可按需改写，但需遵守 I/O 约定） ===== */",
+        _emit_main(fn, sig, mode).rstrip(),
+        "",
+    ]
+    return "\n".join(parts)
+
 
 
 # ── Reference solutions ───────────────────────────────────────────────────────
@@ -1666,7 +2133,7 @@ def P(
         "examples": examples,
         "constraints": constraints or DEFAULT_CONSTRAINTS,
         "functionName": fn_name,
-        "starterCode": starter(fn_name, sig, comment),
+        "starterCode": starter(fn_name, sig, comment, mode),
         "judgeMode": mode,
         "cAbi": (
             {"params": [], "returnKind": "serialize"}
@@ -2880,21 +3347,11 @@ def extend_catalog(C: list[ProblemDef]) -> list[ProblemDef]:
 
             p["ref"] = flatten_ref
 
-    # Fix serialize starter (C codec pair)
+    # Fix serialize starter (full program + codec pair)
     for p in C:
         if p["id"] == "serialize":
             p["cAbi"] = {"params": [{"name": "root", "kind": "tree"}], "returnKind": "serialize"}
-            p["starterCode"] = (
-                "/* TreeNode 由判题环境提供 */\n"
-                "char* serialize(struct TreeNode* root) {\n"
-                "    // 序列化为字符串\n"
-                "    return NULL;\n"
-                "}\n\n"
-                "struct TreeNode* deserialize(char* data) {\n"
-                "    // 从字符串还原\n"
-                "    return NULL;\n"
-                "}\n"
-            )
+            p["starterCode"] = starter("serialize", "(root: Optional[TreeNode]) -> str", "序列化", "serialize")
 
     # ========== 6. LCA (12) ==========
     C += [
@@ -3582,12 +4039,15 @@ def materialize(prob: ProblemDef) -> dict:
 
     # refresh example outputs from first sample when possible
     examples = prob["examples"]
+    statement = prob["statement"].rstrip()
+    if "请编写完整 C 程序" not in statement:
+        statement = statement + "\n\n" + IO_NOTE
     out = {
         "id": prob["id"],
         "title": prob["title"],
         "topic": prob["topic"],
         "difficulty": prob["difficulty"],
-        "statement": prob["statement"],
+        "statement": statement,
         "examples": examples,
         "constraints": prob["constraints"],
         "functionName": prob["functionName"],
@@ -3595,7 +4055,7 @@ def materialize(prob: ProblemDef) -> dict:
         "judgeMode": prob["judgeMode"],
         "cAbi": prob.get("cAbi")
         or (
-            {"params": [], "returnKind": "serialize"}
+            {"params": [{"name": "root", "kind": "tree"}], "returnKind": "serialize"}
             if prob["judgeMode"] == "serialize"
             else {"params": [{"name": "root", "kind": "tree"}], "returnKind": "int"}
         ),

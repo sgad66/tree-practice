@@ -1,6 +1,6 @@
 # 枝径 TreePath
 
-专注**二叉树**知识的在线编程练习站：八大分类、**100** 道题，浏览器内写 **C 语言**。
+专注**二叉树**知识的在线编程练习站：八大分类、**100** 道题，浏览器内编写**完整 C 程序（含 main）**。
 
 ## 分类与题量
 
@@ -19,7 +19,7 @@
 ## 功能
 
 - 中文题面；侧边栏按分类浏览，并显示每类题量；可用分类筛选
-- 浏览器内 C（[browsercc](https://github.com/BertalanD/browsercc) = clang/lld → WASM + WASI）提交与判题，**不在服务端**执行用户代码
+- 浏览器内完整 C 程序判题（[browsercc](https://github.com/BertalanD/browsercc) = clang/lld → WASM + WASI）：编译用户整份程序，stdin 注入用例，比较 stdout
 - 用例级通过/失败：失败用例、期望 vs 实际、错误类型提示
 - 练习区全视口布局（侧栏 + 题面 + 大编辑器 + 结果）
 - 进度保存在 `localStorage`，无需登录
@@ -27,6 +27,24 @@
 ## 公开站点
 
 **https://sgad66.github.io/tree-practice/**
+
+## 输入 / 输出约定（所有题目一致）
+
+请编写**完整 C 程序（含 main）**。每题 starter 已含 `struct TreeNode`、读树/打印辅助函数与 `main` 骨架。
+
+**stdin**（每个参数一行）：
+
+- 树：层序数组，如 `[3,9,20,null,null,15,7]`；空树 `[]`
+- 整数 / 浮点 / 布尔：各占一行（布尔为 `true` / `false`）
+- 一维数组：`[1,2,3]`；二维数组：`[[1,2],[3,4]]`
+- 字符串：一行原文
+- LCA 题：第 1 行树，第 2 行 `p`，第 3 行 `q`（值为节点值）
+
+**stdout**（一行）：
+
+- 整数、`true`/`false`、层序数组，或 JSON 风格数组/字符串（与示例一致）
+
+判题对每个用例：编译一次用户程序 → 用该用例的 stdin 运行 → 解析 stdout 与期望比较。
 
 ## 本地运行
 
@@ -52,17 +70,15 @@ npm run preview
 
 1. 打开首页，点击「开始练习」
 2. 左侧按分类选题（可点筛选芯片）
-3. 按 C 函数原型实现后「提交」；首次会从 CDN 加载 clang WASM 工具链
+3. 在 starter 中实现解题逻辑（可改 `main`，但须遵守 I/O）；点击「提交」；首次会从 CDN 加载 clang WASM 工具链
 4. 全部用例通过后记为已完成
 
 ## 工具链说明 / 限制
 
 - 判题在浏览器内：`browsercc`（Clang/LLD WASM）编译为 WASI 模块，再用 `@bjorn3/browser_wasi_shim` 运行
-- 首次加载约需下载 **clang.wasm / lld.wasm / sysroot**（合计约 90MB 量级，视 CDN 与压缩而定），需联网
-- 面向常见题解子集：C 风格 API（`struct TreeNode`、`malloc` 返回数组、`returnSize` / `returnColumnSizes`）
+- 首次加载约需下载 **clang.wasm / lld.wasm / sysroot**（合计约 90MB 量级），需联网
 - 底层经 browsercc 的 **clang++ / C++17**（`-fno-exceptions`）编译；请写可被 C++17 接受的 C 代码（勿用 GCC 嵌套函数等扩展）
-- WASI 环境无完整 POSIX 线程；请勿依赖文件、网络、多线程
-- 不要在解法中定义 `main`（判题 harness 会提供）
+- WASI 环境无完整 POSIX 线程；请勿依赖文件、网络、多线程（stdin/stdout 可用）
 
 ## 技术栈
 
