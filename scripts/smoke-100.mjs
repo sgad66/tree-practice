@@ -2,17 +2,28 @@ import puppeteer from 'puppeteer-core'
 
 const BASE = process.env.APP_URL || 'http://127.0.0.1:5173'
 
+function wrapSolution(starter, solutionFnSrc) {
+  const startMark = '/* ===== 解题区'
+  const mainMark = '/* ===== main'
+  const i = starter.indexOf(startMark)
+  const j = starter.indexOf(mainMark)
+  if (i < 0 || j < 0) throw new Error('starter missing markers')
+  return starter.slice(0, i) + solutionFnSrc.trim() + '\n\n' + starter.slice(j)
+}
+
 const CASES = [
   {
     label: 'basics/max-depth',
     openTitle: '二叉树的最大深度',
-    bad: `int maxDepth(struct TreeNode* root) {
+    bad: `/* ===== 解题区 ===== */
+int maxDepth(struct TreeNode* root) {
     if (!root) return 0;
     int l = maxDepth(root->left), r = maxDepth(root->right);
     return l > r ? l : r; /* missing +1 */
 }
 `,
-    good: `int maxDepth(struct TreeNode* root) {
+    good: `/* ===== 解题区 ===== */
+int maxDepth(struct TreeNode* root) {
     if (!root) return 0;
     int l = maxDepth(root->left), r = maxDepth(root->right);
     return 1 + (l > r ? l : r);
@@ -22,7 +33,8 @@ const CASES = [
   {
     label: 'bst/validate-bst',
     openTitle: '验证二叉搜索树',
-    bad: `#include <stdbool.h>
+    bad: `/* ===== 解题区 ===== */
+#include <stdbool.h>
 bool isValidBST(struct TreeNode* root) {
     if (!root) return true;
     if (root->left && root->left->val >= root->val) return false;
@@ -30,7 +42,8 @@ bool isValidBST(struct TreeNode* root) {
     return isValidBST(root->left) && isValidBST(root->right);
 }
 `,
-    good: `#include <stdbool.h>
+    good: `/* ===== 解题区 ===== */
+#include <stdbool.h>
 #include <limits.h>
 static bool ok(struct TreeNode* n, long lo, long hi) {
     if (!n) return true;
@@ -45,7 +58,8 @@ bool isValidBST(struct TreeNode* root) {
   {
     label: 'levelview/level-order',
     openTitle: '二叉树的层序遍历',
-    bad: `int** levelOrder(struct TreeNode* root, int* returnSize, int** returnColumnSizes) {
+    bad: `/* ===== 解题区 ===== */
+int** levelOrder(struct TreeNode* root, int* returnSize, int** returnColumnSizes) {
     *returnSize = 0;
     if (!root) return NULL;
     int* row = (int*)malloc(sizeof(int));
@@ -59,7 +73,8 @@ bool isValidBST(struct TreeNode* root) {
     return out; /* incomplete BFS */
 }
 `,
-    good: `int** levelOrder(struct TreeNode* root, int* returnSize, int** returnColumnSizes) {
+    good: `/* ===== 解题区 ===== */
+int** levelOrder(struct TreeNode* root, int* returnSize, int** returnColumnSizes) {
     *returnSize = 0;
     if (!root) return NULL;
     struct TreeNode* q[256];
@@ -106,6 +121,10 @@ if (!landingText.includes('100 题') && !/100/.test(landingText)) {
 } else {
   console.log('landing shows 100')
 }
+if (!/完整 C 程序|含 main/.test(landingText)) {
+  console.error('Landing missing full-program messaging')
+  process.exitCode = 1
+}
 
 await page.click('button.btn--primary')
 await page.waitForFunction(
@@ -141,20 +160,26 @@ async function openByTitle(title) {
 
 for (const c of CASES) {
   await openByTitle(c.openTitle)
+  const starter = await page.evaluate(() => window.__treePractice.getCode())
+  if (!starter.includes('int main')) {
+    console.error('FAIL: starter missing main', c.label)
+    process.exitCode = 1
+    continue
+  }
   await page.evaluate(async (src) => {
     await window.__treePractice.submit(src)
-  }, c.bad)
+  }, wrapSolution(starter, c.bad))
   let result = await page.evaluate(() => window.__treePractice.getResult())
-  console.log(c.label, 'bad ok?', result?.ok, 'passed', result?.passedCount)
+  console.log(c.label, 'bad ok?', result?.ok, 'passed', result?.passedCount, result?.compileError?.slice?.(0, 120))
   if (result?.ok) {
     console.error('FAIL: bad should not pass', c.label)
     process.exitCode = 1
   }
   await page.evaluate(async (src) => {
     await window.__treePractice.submit(src)
-  }, c.good)
+  }, wrapSolution(starter, c.good))
   result = await page.evaluate(() => window.__treePractice.getResult())
-  console.log(c.label, 'good ok?', result?.ok, 'passed', result?.passedCount)
+  console.log(c.label, 'good ok?', result?.ok, 'passed', result?.passedCount, result?.compileError?.slice?.(0, 200))
   if (!result?.ok) {
     console.error('FAIL: good should pass', c.label, result)
     process.exitCode = 1

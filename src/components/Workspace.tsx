@@ -18,7 +18,7 @@ interface Props {
   onBack: () => void
 }
 
-const draftKey = (id: string) => `tree-practice:draft:c:${id}`
+const draftKey = (id: string) => `tree-practice:draft:c-full:${id}`
 
 function difficultyClass(d: Problem['difficulty']): string {
   if (d === '简单') return 'badge badge--easy'
@@ -190,6 +190,9 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
               <span className="statement__lang">C语言</span>
             </div>
             <p style={{ whiteSpace: 'pre-wrap' }}>{problem.statement}</p>
+            <p className="statement__io-callout">
+              请编写完整 C 程序（含 main）。判题编译运行整份程序：stdin 注入用例，比较 stdout。
+            </p>
             <h3>示例</h3>
             {problem.examples.map((ex, i) => (
               <div className="example" key={i}>
@@ -209,7 +212,7 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
           <section className="editor-pane">
             <div className="editor-toolbar">
               <span className="editor-toolbar__lang">
-                C · {problem.functionName}
+                C · 完整程序 · {problem.functionName}
               </span>
               <div className="editor-toolbar__actions">
                 <button type="button" className="btn btn--quiet" onClick={resetCode}>

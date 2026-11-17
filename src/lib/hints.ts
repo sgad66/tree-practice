@@ -34,7 +34,7 @@ export function inferHint(
   }
 
   if (actual === undefined) {
-    return '没有得到返回值：请确认函数有 return，数组题需设置 *returnSize。'
+    return '没有得到 stdout 输出：请确认 main 打印了答案；数组题需设置 *returnSize 并打印。'
   }
 
   if (typeof expected === 'boolean' && typeof actual === 'boolean') {

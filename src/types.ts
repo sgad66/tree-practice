@@ -10,16 +10,19 @@ export type TopicId =
   | 'levelview'
   | 'advanced'
 
-/** How the in-browser C harness prepares args / compares results. */
+/**
+ * How stdin args are interpreted / expected stdout is shaped.
+ * Judge compiles the user's full program and feeds each test via stdin.
+ */
 export type JudgeMode =
-  | 'value' // first list-looking arg → tree; compare JSON value
-  | 'trees' // every list-looking arg → tree; compare JSON value
-  | 'tree_return' // like value, but return TreeNode → level-order list
-  | 'trees_return' // every list-looking arg → tree; return TreeNode → list
-  | 'raw' // keep arrays as arrays; compare JSON value
-  | 'raw_tree_return' // keep arrays; return TreeNode → list
-  | 'lca' // (tree, pVal, qVal) → return node.val
-  | 'serialize' // round-trip serialize/deserialize
+  | 'value' // first list-looking arg → tree line; compare stdout JSON
+  | 'trees' // every list-looking arg → tree line
+  | 'tree_return' // like value; stdout is level-order tree
+  | 'trees_return' // every list-looking arg → tree; stdout tree
+  | 'raw' // keep arrays as array lines
+  | 'raw_tree_return' // keep arrays; stdout tree
+  | 'lca' // stdin: tree, pVal, qVal → stdout node value
+  | 'serialize' // stdin tree; stdout round-trip tree
 
 export type CParamKind =
   | 'tree'
@@ -38,6 +41,7 @@ export type CReturnKind =
   | CParamKind
   | 'serialize'
 
+/** Describes how starter main maps stdin lines → solution call (documentation / generation). */
 export interface CAbi {
   params: { name: string; kind: CParamKind }[]
   returnKind: CReturnKind
@@ -63,9 +67,9 @@ export type JsonValue =
 export interface TestCase {
   /** Human-readable input description for sample / failure UI */
   inputLabel: string
-  /** Arguments passed to the solution function (JSON-serializable) */
+  /** Arguments encoded as stdin lines (JSON-serializable) */
   args: JsonValue[]
-  /** Expected return value */
+  /** Expected stdout value (parsed JSON) */
   expected: JsonValue
   /** Whether this case is shown in the problem statement */
   sample?: boolean
@@ -81,13 +85,14 @@ export interface Problem {
   statement: string
   examples: { input: string; output: string; explanation?: string }[]
   constraints: string[]
-  /** C function name the user must implement */
+  /** Suggested solution function name inside the full program */
   functionName: string
+  /** Full C program skeleton (includes + TreeNode + helpers + main) */
   starterCode: string
-  /** Extra C helpers injected before user code (rare) */
+  /** @deprecated unused in full-program mode */
   harnessExtras?: string
   judgeMode?: JudgeMode
-  /** Structured C ABI for the judge harness */
+  /** Structured C ABI used to format stdin / starter main */
   cAbi: CAbi
   tests: TestCase[]
 }
