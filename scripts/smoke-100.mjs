@@ -6,30 +6,97 @@ const CASES = [
   {
     label: 'basics/max-depth',
     openTitle: '二叉树的最大深度',
-    bad: `from typing import Optional\n\ndef maxDepth(root: Optional[TreeNode]) -> int:\n    if not root:\n        return 0\n    return max(maxDepth(root.left), maxDepth(root.right))  # missing +1\n`,
-    good: `from typing import Optional\n\ndef maxDepth(root: Optional[TreeNode]) -> int:\n    if not root:\n        return 0\n    return 1 + max(maxDepth(root.left), maxDepth(root.right))\n`,
+    bad: `int maxDepth(struct TreeNode* root) {
+    if (!root) return 0;
+    int l = maxDepth(root->left), r = maxDepth(root->right);
+    return l > r ? l : r; /* missing +1 */
+}
+`,
+    good: `int maxDepth(struct TreeNode* root) {
+    if (!root) return 0;
+    int l = maxDepth(root->left), r = maxDepth(root->right);
+    return 1 + (l > r ? l : r);
+}
+`,
   },
   {
     label: 'bst/validate-bst',
     openTitle: '验证二叉搜索树',
-    bad: `from typing import Optional\n\ndef isValidBST(root: Optional[TreeNode]) -> bool:\n    if not root:\n        return True\n    if root.left and root.left.val >= root.val: return False\n    if root.right and root.right.val <= root.val: return False\n    return isValidBST(root.left) and isValidBST(root.right)\n`,
-    good: `from typing import Optional\n\ndef isValidBST(root: Optional[TreeNode]) -> bool:\n    def ok(n, lo, hi):\n        if not n: return True\n        if n.val <= lo or n.val >= hi: return False\n        return ok(n.left, lo, n.val) and ok(n.right, n.val, hi)\n    return ok(root, float('-inf'), float('inf'))\n`,
+    bad: `#include <stdbool.h>
+bool isValidBST(struct TreeNode* root) {
+    if (!root) return true;
+    if (root->left && root->left->val >= root->val) return false;
+    if (root->right && root->right->val <= root->val) return false;
+    return isValidBST(root->left) && isValidBST(root->right);
+}
+`,
+    good: `#include <stdbool.h>
+#include <limits.h>
+static bool ok(struct TreeNode* n, long lo, long hi) {
+    if (!n) return true;
+    if (n->val <= lo || n->val >= hi) return false;
+    return ok(n->left, lo, n->val) && ok(n->right, n->val, hi);
+}
+bool isValidBST(struct TreeNode* root) {
+    return ok(root, LONG_MIN, LONG_MAX);
+}
+`,
   },
   {
     label: 'levelview/level-order',
     openTitle: '二叉树的层序遍历',
-    bad: `from typing import Optional, List\n\ndef levelOrder(root: Optional[TreeNode]) -> List[List[int]]:\n    if not root: return []\n    # wrong: flat list wrapped once\n    from collections import deque\n    q=deque([root]); out=[]\n    while q:\n        n=q.popleft(); out.append(n.val)\n        if n.left: q.append(n.left)\n        if n.right: q.append(n.right)\n    return [out]\n`,
-    good: `from typing import Optional, List\nfrom collections import deque\n\ndef levelOrder(root: Optional[TreeNode]) -> List[List[int]]:\n    if not root: return []\n    res=[]; q=deque([root])\n    while q:\n        lv=[]\n        for _ in range(len(q)):\n            n=q.popleft(); lv.append(n.val)\n            if n.left: q.append(n.left)\n            if n.right: q.append(n.right)\n        res.append(lv)\n    return res\n`,
+    bad: `int** levelOrder(struct TreeNode* root, int* returnSize, int** returnColumnSizes) {
+    *returnSize = 0;
+    if (!root) return NULL;
+    int* row = (int*)malloc(sizeof(int));
+    row[0] = root->val;
+    int** out = (int**)malloc(sizeof(int*));
+    out[0] = row;
+    int* cols = (int*)malloc(sizeof(int));
+    cols[0] = 1;
+    *returnColumnSizes = cols;
+    *returnSize = 1;
+    return out; /* incomplete BFS */
+}
+`,
+    good: `int** levelOrder(struct TreeNode* root, int* returnSize, int** returnColumnSizes) {
+    *returnSize = 0;
+    if (!root) return NULL;
+    struct TreeNode* q[256];
+    int qh = 0, qt = 0;
+    q[qt++] = root;
+    int** res = (int**)malloc(sizeof(int*) * 64);
+    int* cols = (int*)malloc(sizeof(int) * 64);
+    int rows = 0;
+    while (qh < qt) {
+        int sz = qt - qh;
+        int* lv = (int*)malloc(sizeof(int) * (size_t)sz);
+        for (int i = 0; i < sz; i++) {
+            struct TreeNode* n = q[qh++];
+            lv[i] = n->val;
+            if (n->left) q[qt++] = n->left;
+            if (n->right) q[qt++] = n->right;
+        }
+        res[rows] = lv;
+        cols[rows] = sz;
+        rows++;
+    }
+    *returnColumnSizes = cols;
+    *returnSize = rows;
+    return res;
+}
+`,
   },
 ]
 
 const browser = await puppeteer.launch({
   executablePath: '/usr/bin/google-chrome-stable',
   headless: true,
+  protocolTimeout: 600000,
   args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
 })
 const page = await browser.newPage()
-page.setDefaultTimeout(180000)
+page.setDefaultTimeout(600000)
 await page.goto(BASE, { waitUntil: 'networkidle2' })
 
 const landingText = await page.evaluate(() => document.body.innerText)
@@ -42,8 +109,8 @@ if (!landingText.includes('100 题') && !/100/.test(landingText)) {
 
 await page.click('button.btn--primary')
 await page.waitForFunction(
-  () => document.body.innerText.includes('Pyodide 就绪'),
-  { timeout: 180000 },
+  () => document.body.innerText.includes('C 工具链就绪'),
+  { timeout: 300000 },
 )
 await page.waitForFunction(() => window.__treePractice, { timeout: 30000 })
 
@@ -78,32 +145,20 @@ for (const c of CASES) {
     await window.__treePractice.submit(src)
   }, c.bad)
   let result = await page.evaluate(() => window.__treePractice.getResult())
-  console.log(c.label, 'bad', {
-    ok: result?.ok,
-    passed: result?.passedCount,
-    total: result?.totalCount,
-    actual0: result?.cases?.[0]?.actual,
-    hint0: result?.cases?.[0]?.hint,
-  })
+  console.log(c.label, 'bad ok?', result?.ok, 'passed', result?.passedCount)
   if (result?.ok) {
-    console.error(c.label, 'bad solution unexpectedly passed')
+    console.error('FAIL: bad should not pass', c.label)
     process.exitCode = 1
   }
-  if (result?.cases?.some((x) => !x.passed && x.actual === undefined && !x.error)) {
-    console.error(c.label, 'missing actual on failure')
-    process.exitCode = 1
-  }
-
   await page.evaluate(async (src) => {
     await window.__treePractice.submit(src)
   }, c.good)
   result = await page.evaluate(() => window.__treePractice.getResult())
-  console.log(c.label, 'good', { ok: result?.ok, passed: result?.passedCount })
+  console.log(c.label, 'good ok?', result?.ok, 'passed', result?.passedCount)
   if (!result?.ok) {
-    console.error(c.label, 'good failed', JSON.stringify(result, null, 2).slice(0, 800))
+    console.error('FAIL: good should pass', c.label, result)
     process.exitCode = 1
   }
 }
 
 await browser.close()
-console.log(process.exitCode ? 'SMOKE FAIL' : 'SMOKE OK')

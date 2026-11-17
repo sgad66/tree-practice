@@ -3,12 +3,12 @@ import type { RunResult } from '../types'
 interface Props {
   result: RunResult | null
   running: boolean
-  pyodideReady: boolean
+  toolchainReady: boolean
 }
 
 function fmt(v: unknown): string {
   if (v === undefined) return '（无返回值）'
-  if (v === null) return 'null（None）'
+  if (v === null) return 'null'
   try {
     return JSON.stringify(v)
   } catch {
@@ -16,11 +16,11 @@ function fmt(v: unknown): string {
   }
 }
 
-export function TestResults({ result, running, pyodideReady }: Props) {
+export function TestResults({ result, running, toolchainReady }: Props) {
   if (running) {
     return (
       <div className="results">
-        <div className="pyodide-banner">正在浏览器中运行 Python（Pyodide）…</div>
+        <div className="toolchain-banner">正在浏览器中编译并运行 C（clang → WASM）…</div>
       </div>
     )
   }
@@ -28,10 +28,10 @@ export function TestResults({ result, running, pyodideReady }: Props) {
   if (!result) {
     return (
       <div className="results">
-        <div className="pyodide-banner">
-          {pyodideReady
-            ? '编写解法后点击「提交」。失败时会标出具体用例、期望与实际，并给出简短提示。'
-            : '首次加载会拉取 Pyodide 运行时，稍候即可提交。'}
+        <div className="toolchain-banner">
+          {toolchainReady
+            ? '编写 C 解法后点击「提交」。失败时会标出具体用例、期望与实际，并给出简短提示。'
+            : '首次加载会拉取浏览器内 C 工具链（约数十 MB），稍候即可提交。'}
         </div>
       </div>
     )

@@ -3,7 +3,11 @@ import { PROBLEMS, TOPICS, getProblem, topicCounts } from '../data/problems'
 import type { Problem, RunResult } from '../types'
 import { CodeEditor } from './CodeEditor'
 import { TestResults } from './TestResults'
-import { runProblem, preloadPyodide, getPyodide } from '../lib/pyodide'
+import {
+  runProblem,
+  preloadToolchain,
+  ensureToolchain,
+} from '../lib/clangJudge'
 import { markSolved } from '../lib/progress'
 
 interface Props {
@@ -13,7 +17,7 @@ interface Props {
   onBack: () => void
 }
 
-const draftKey = (id: string) => `tree-practice:draft:${id}`
+const draftKey = (id: string) => `tree-practice:draft:c:${id}`
 
 function difficultyClass(d: Problem['difficulty']): string {
   if (d === '简单') return 'badge badge--easy'
@@ -28,7 +32,7 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
   const [code, setCode] = useState(problem.starterCode)
   const [result, setResult] = useState<RunResult | null>(null)
   const [running, setRunning] = useState(false)
-  const [pyodideReady, setPyodideReady] = useState(false)
+  const [toolchainReady, setToolchainReady] = useState(false)
   const [filterTopic, setFilterTopic] = useState<string>('all')
   const counts = useMemo(() => topicCounts(), [])
 
@@ -40,10 +44,10 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
   resultRef.current = result
 
   useEffect(() => {
-    preloadPyodide()
-    getPyodide()
-      .then(() => setPyodideReady(true))
-      .catch(() => setPyodideReady(false))
+    preloadToolchain()
+    ensureToolchain()
+      .then(() => setToolchainReady(true))
+      .catch(() => setToolchainReady(false))
   }, [])
 
   useEffect(() => {
@@ -114,7 +118,7 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
           </span>
         </div>
         <div className="progress-pill">
-          {pyodideReady ? 'Pyodide 就绪' : '正在加载 Pyodide…'}
+          {toolchainReady ? 'C 工具链就绪' : '正在加载 C 工具链…'}
         </div>
       </header>
 
@@ -182,6 +186,7 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
               <span>
                 {TOPICS.find((t) => t.id === problem.topic)?.name}
               </span>
+              <span className="statement__lang">C语言</span>
             </div>
             <p style={{ whiteSpace: 'pre-wrap' }}>{problem.statement}</p>
             <h3>示例</h3>
@@ -202,7 +207,9 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
 
           <section className="editor-pane">
             <div className="editor-toolbar">
-              <span className="editor-toolbar__lang">Python · {problem.functionName}</span>
+              <span className="editor-toolbar__lang">
+                C · {problem.functionName}
+              </span>
               <div className="editor-toolbar__actions">
                 <button type="button" className="btn btn--quiet" onClick={resetCode}>
                   重置代码
@@ -211,7 +218,7 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
                   type="button"
                   className="btn btn--solid"
                   onClick={() => void handleSubmit()}
-                  disabled={running || !pyodideReady}
+                  disabled={running || !toolchainReady}
                 >
                   {running ? '运行中…' : '提交'}
                 </button>
@@ -223,7 +230,7 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
           <TestResults
             result={result}
             running={running}
-            pyodideReady={pyodideReady}
+            toolchainReady={toolchainReady}
           />
         </main>
       </div>

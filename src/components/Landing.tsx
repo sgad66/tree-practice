@@ -14,7 +14,7 @@ export function Landing({ solvedCount, onEnter }: Props) {
       <header className="landing__nav">
         <div className="brand-mark">枝径</div>
         <div className="landing__nav-meta">
-          {PROBLEMS.length} 题 · 已完成 {solvedCount}
+          {PROBLEMS.length} 题 · 已完成 {solvedCount} · C语言
         </div>
       </header>
 
@@ -25,7 +25,7 @@ export function Landing({ solvedCount, onEnter }: Props) {
         </h1>
         <p className="hero__lede">
           一百道二叉树专项题，按八大分类练习：遍历、基础属性、路径、BST、构造、
-          LCA、层序视图与进阶综合。浏览器内写 Python，提交即见失败用例与提示。
+          LCA、层序视图与进阶综合。浏览器内写 C 语言，提交即见失败用例与提示。
         </p>
         <div className="hero__actions">
           <button type="button" className="btn btn--primary" onClick={onEnter}>
