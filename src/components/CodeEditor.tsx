@@ -1,0 +1,27 @@
+import CodeMirror from '@uiw/react-codemirror'
+import { python } from '@codemirror/lang-python'
+import { oneDark } from '@codemirror/theme-one-dark'
+
+interface Props {
+  value: string
+  onChange: (value: string) => void
+}
+
+export function CodeEditor({ value, onChange }: Props) {
+  return (
+    <div className="cm-wrapper">
+      <CodeMirror
+        value={value}
+        height="100%"
+        theme={oneDark}
+        extensions={[python()]}
+        onChange={onChange}
+        basicSetup={{
+          lineNumbers: true,
+          foldGutter: true,
+          highlightActiveLine: true,
+        }}
+      />
+    </div>
+  )
+}

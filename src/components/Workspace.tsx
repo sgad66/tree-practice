@@ -1,0 +1,232 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { PROBLEMS, TOPICS, getProblem, topicCounts } from '../data/problems'
+import type { Problem, RunResult } from '../types'
+import { CodeEditor } from './CodeEditor'
+import { TestResults } from './TestResults'
+import { runProblem, preloadPyodide, getPyodide } from '../lib/pyodide'
+import { markSolved } from '../lib/progress'
+
+interface Props {
+  initialId?: string
+  solved: Set<string>
+  onSolved: (ids: Set<string>) => void
+  onBack: () => void
+}
+
+const draftKey = (id: string) => `tree-practice:draft:${id}`
+
+function difficultyClass(d: Problem['difficulty']): string {
+  if (d === '简单') return 'badge badge--easy'
+  if (d === '中等') return 'badge badge--mid'
+  return 'badge badge--hard'
+}
+
+export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
+  const firstId = initialId ?? PROBLEMS[0]?.id ?? 'preorder'
+  const [activeId, setActiveId] = useState(firstId)
+  const problem = useMemo(() => getProblem(activeId) ?? PROBLEMS[0], [activeId])
+  const [code, setCode] = useState(problem.starterCode)
+  const [result, setResult] = useState<RunResult | null>(null)
+  const [running, setRunning] = useState(false)
+  const [pyodideReady, setPyodideReady] = useState(false)
+  const [filterTopic, setFilterTopic] = useState<string>('all')
+  const counts = useMemo(() => topicCounts(), [])
+
+  const codeRef = useRef(code)
+  const problemRef = useRef(problem)
+  const resultRef = useRef(result)
+  codeRef.current = code
+  problemRef.current = problem
+  resultRef.current = result
+
+  useEffect(() => {
+    preloadPyodide()
+    getPyodide()
+      .then(() => setPyodideReady(true))
+      .catch(() => setPyodideReady(false))
+  }, [])
+
+  useEffect(() => {
+    const saved = localStorage.getItem(draftKey(problem.id))
+    setCode(saved ?? problem.starterCode)
+    setResult(null)
+  }, [problem])
+
+  useEffect(() => {
+    localStorage.setItem(draftKey(problem.id), code)
+  }, [code, problem.id])
+
+  async function handleSubmit(overrideCode?: string) {
+    const currentProblem = problemRef.current
+    const source = overrideCode ?? codeRef.current
+    setRunning(true)
+    setResult(null)
+    try {
+      const res = await runProblem(currentProblem, source)
+      setResult(res)
+      if (res.ok) {
+        onSolved(markSolved(currentProblem.id))
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setResult({
+        ok: false,
+        compileError: msg,
+        cases: [],
+        passedCount: 0,
+        totalCount: currentProblem.tests.length,
+      })
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  useEffect(() => {
+    const api = {
+      setCode: (next: string) => {
+        codeRef.current = next
+        setCode(next)
+      },
+      getCode: () => codeRef.current,
+      getResult: () => resultRef.current,
+      submit: (overrideCode?: string) => handleSubmit(overrideCode),
+    }
+    ;(window as unknown as { __treePractice?: typeof api }).__treePractice = api
+    return () => {
+      delete (window as unknown as { __treePractice?: typeof api }).__treePractice
+    }
+  })
+
+  function resetCode() {
+    setCode(problem.starterCode)
+    setResult(null)
+  }
+
+  return (
+    <div className="practice">
+      <header className="practice__top">
+        <div className="practice__top-left">
+          <button type="button" className="btn btn--quiet" onClick={onBack}>
+            ← 枝径
+          </button>
+          <span className="progress-pill">
+            进度 {solved.size}/{PROBLEMS.length}
+          </span>
+        </div>
+        <div className="progress-pill">
+          {pyodideReady ? 'Pyodide 就绪' : '正在加载 Pyodide…'}
+        </div>
+      </header>
+
+      <div className="practice__layout">
+        <aside className="sidebar">
+          <div className="sidebar__filters">
+            <button
+              type="button"
+              className={`filter-chip ${filterTopic === 'all' ? 'is-active' : ''}`}
+              onClick={() => setFilterTopic('all')}
+            >
+              全部 {PROBLEMS.length}
+            </button>
+            {TOPICS.map((t) => (
+              <button
+                type="button"
+                key={t.id}
+                className={`filter-chip ${filterTopic === t.id ? 'is-active' : ''}`}
+                onClick={() => setFilterTopic(t.id)}
+              >
+                {t.name} {counts[t.id] ?? 0}
+              </button>
+            ))}
+          </div>
+          {TOPICS.filter((topic) => filterTopic === 'all' || filterTopic === topic.id).map(
+            (topic) => {
+              const list = PROBLEMS.filter((p) => p.topic === topic.id)
+              if (!list.length) return null
+              return (
+                <div className="sidebar__topic" key={topic.id}>
+                  <div className="sidebar__topic-name">
+                    {topic.name}
+                    <span className="sidebar__topic-count">{list.length}</span>
+                  </div>
+                  {list.map((p) => (
+                    <button
+                      type="button"
+                      key={p.id}
+                      className={`problem-link ${p.id === problem.id ? 'is-active' : ''}`}
+                      onClick={() => setActiveId(p.id)}
+                    >
+                      <span
+                        className={`dot ${solved.has(p.id) ? 'dot--done' : ''}`}
+                        aria-hidden
+                      />
+                      <span className="problem-link__title">{p.title}</span>
+                      <span className={difficultyClass(p.difficulty)}>
+                        {p.difficulty}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )
+            },
+          )}
+        </aside>
+
+        <main className="workspace">
+          <section className="statement">
+            <h1>{problem.title}</h1>
+            <div className="statement__meta">
+              <span className={difficultyClass(problem.difficulty)}>
+                {problem.difficulty}
+              </span>
+              <span>
+                {TOPICS.find((t) => t.id === problem.topic)?.name}
+              </span>
+            </div>
+            <p style={{ whiteSpace: 'pre-wrap' }}>{problem.statement}</p>
+            <h3>示例</h3>
+            {problem.examples.map((ex, i) => (
+              <div className="example" key={i}>
+                <div>输入：{ex.input}</div>
+                <div>输出：{ex.output}</div>
+                {ex.explanation && <div>说明：{ex.explanation}</div>}
+              </div>
+            ))}
+            <h3>约束</h3>
+            <ul>
+              {problem.constraints.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="editor-pane">
+            <div className="editor-toolbar">
+              <span className="editor-toolbar__lang">Python · {problem.functionName}</span>
+              <div className="editor-toolbar__actions">
+                <button type="button" className="btn btn--quiet" onClick={resetCode}>
+                  重置代码
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--solid"
+                  onClick={() => void handleSubmit()}
+                  disabled={running || !pyodideReady}
+                >
+                  {running ? '运行中…' : '提交'}
+                </button>
+              </div>
+            </div>
+            <CodeEditor value={code} onChange={setCode} />
+          </section>
+
+          <TestResults
+            result={result}
+            running={running}
+            pyodideReady={pyodideReady}
+          />
+        </main>
+      </div>
+    </div>
+  )
+}
