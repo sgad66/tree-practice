@@ -28,11 +28,23 @@
 }
 
 html,
-body,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
 #root {
   margin: 0;
-  height: 100%;
-  min-height: 100%;
+  min-height: 100dvh;
+}
+
+/* Desktop practice locks to viewport; mobile uses document scroll */
+@media (min-width: 961px) {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
 }
 
 body {
@@ -63,8 +75,17 @@ a {
   height: 100%;
 }
 
+/* Desktop: keep practice in the viewport; scroll lives inside .workspace */
 .app-shell:has(.practice) {
   overflow: hidden;
+}
+
+@media (max-width: 960px) {
+  .app-shell:has(.practice) {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
 }
 
 /* —— Landing —— */
@@ -277,6 +298,8 @@ a {
 
 .practice__top {
   flex: 0 0 auto;
+  position: sticky;
+  top: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -427,19 +450,23 @@ a {
   box-shadow: 0 0 0 3px rgba(26, 122, 76, 0.18);
 }
 
+/* Single-column flow: statement → editor → results; column scrolls */
 .workspace {
-  display: grid;
-  grid-template-rows: minmax(120px, 0.9fr) minmax(220px, 1.45fr) minmax(140px, 0.95fr);
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   height: 100%;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .statement {
-  padding: 1.1rem 1.35rem 0.9rem;
+  flex: 0 0 auto;
+  padding: 1.1rem 1.35rem 1.15rem;
   border-bottom: 1px solid var(--line);
-  overflow: auto;
-  min-height: 0;
+  overflow: visible;
+  max-height: none;
   background: rgba(255, 255, 255, 0.35);
 }
 
@@ -476,8 +503,47 @@ a {
   color: var(--moss-deep);
 }
 
+.statement__body {
+  margin: 0 0 0.35rem;
+}
+
+.statement__constraints {
+  margin: 1rem 0 0.85rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(20, 32, 26, 0.03);
+}
+
+.statement__constraints > summary {
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  color: var(--moss-deep);
+  list-style: none;
+}
+
+.statement__constraints > summary::-webkit-details-marker {
+  display: none;
+}
+
+.statement__constraints > summary::after {
+  content: ' ▾';
+  font-size: 0.8em;
+  opacity: 0.65;
+}
+
+.statement__constraints[open] > summary::after {
+  content: ' ▴';
+}
+
+.statement__constraints ul {
+  margin: 0.55rem 0 0.15rem;
+  padding-left: 1.2rem;
+}
+
 .statement__io-callout {
-  margin: 0.85rem 0 0.5rem;
+  margin: 0.85rem 0 0.25rem;
   padding: 0.65rem 0.85rem;
   border-left: 3px solid var(--moss-deep);
   background: rgba(15, 61, 44, 0.06);
@@ -506,14 +572,19 @@ a {
 }
 
 .editor-pane {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  min-height: 0;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  height: min(52vh, 560px);
+  min-height: 280px;
+  max-height: min(52vh, 560px);
+  overflow: hidden;
   border-bottom: 1px solid var(--line);
   background: #0f1612;
 }
 
 .editor-toolbar {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -537,25 +608,33 @@ a {
 }
 
 .cm-wrapper {
-  height: 100%;
+  /* flex child must not expand the pane — force height so CM scrolls inside */
+  flex: 1 1 0;
   min-height: 0;
+  height: 0;
   overflow: hidden;
+  position: relative;
 }
 
 .cm-wrapper .cm-editor {
-  height: 100%;
+  height: 100% !important;
+  max-height: 100%;
   font-size: 0.95rem;
 }
 
 .cm-wrapper .cm-scroller {
   font-family: var(--font-mono);
   line-height: 1.55;
+  overflow: auto !important;
+  height: 100% !important;
+  max-height: 100%;
 }
 
 .results {
-  padding: 0.9rem 1.25rem 1.15rem;
+  flex: 0 0 auto;
+  padding: 0.9rem 1.25rem 1.35rem;
   background: var(--fog);
-  overflow: auto;
+  overflow: visible;
   min-height: 0;
   border-top: 1px solid var(--line);
 }
@@ -643,39 +722,55 @@ a {
 }
 
 @media (max-width: 960px) {
+  /* Page-level vertical scroll: full statement, then editor, then results */
   .practice {
     height: auto;
     max-height: none;
-    overflow: visible;
-  }
-
-  .app-shell:has(.practice) {
+    min-height: 100dvh;
     overflow: visible;
   }
 
   .practice__layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
   }
 
   .sidebar {
+    flex: 0 0 auto;
     border-right: 0;
     border-bottom: 1px solid var(--line);
-    max-height: 200px;
+    /* Compact picker so title + examples fit the first screen */
+    max-height: 132px;
+    overflow: auto;
   }
 
   .workspace {
-    grid-template-rows: auto minmax(320px, 55vh) auto;
+    flex: 1 1 auto;
     height: auto;
+    min-height: 0;
     overflow: visible;
   }
 
   .statement {
-    max-height: 36vh;
+    max-height: none;
+    overflow: visible;
+    padding-bottom: 1.35rem;
+  }
+
+  .editor-pane {
+    /* Editor sits below the full statement; fixed pane height + internal CM scroll */
+    height: min(58vh, 480px);
+    min-height: 300px;
+    max-height: min(58vh, 480px);
   }
 
   .results {
     max-height: none;
+    overflow: visible;
+    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
   }
 
   .hero__brand {
@@ -683,4 +778,4 @@ a {
   }
 }
 
-/* pages-redeploy 20261117T172235Z */
+/* pages-redeploy 20261118T042100Z-mobile-scroll */

@@ -26,6 +26,17 @@ function difficultyClass(d: Problem['difficulty']): string {
   return 'badge badge--hard'
 }
 
+/** Keep the short problem lede above examples; tuck long I/O notes. */
+function splitStatement(text: string): { lede: string; ioNote: string } {
+  const marker = '【编写说明】'
+  const i = text.indexOf(marker)
+  if (i < 0) return { lede: text, ioNote: '' }
+  return {
+    lede: text.slice(0, i).trim(),
+    ioNote: text.slice(i).trim(),
+  }
+}
+
 export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
   const firstId = initialId ?? PROBLEMS[0]?.id ?? 'preorder'
   const [activeId, setActiveId] = useState(firstId)
@@ -106,6 +117,8 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
     setCode(problem.starterCode)
     setResult(null)
   }
+
+  const { lede, ioNote } = splitStatement(problem.statement)
 
   return (
     <div className="practice">
@@ -189,9 +202,11 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
               </span>
               <span className="statement__lang">C语言</span>
             </div>
-            <p style={{ whiteSpace: 'pre-wrap' }}>{problem.statement}</p>
+            <p className="statement__body" style={{ whiteSpace: 'pre-wrap' }}>
+              {lede}
+            </p>
             <p className="statement__io-callout">
-              请编写完整 C 程序（含 main）。判题编译运行整份程序：stdin 注入用例，比较 stdout。
+              请编写完整 C 程序（含 main）。判题经 stdin 注入用例，比较 stdout。
             </p>
             <h3>示例</h3>
             {problem.examples.map((ex, i) => (
@@ -201,15 +216,23 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
                 {ex.explanation && <div>说明：{ex.explanation}</div>}
               </div>
             ))}
-            <h3>约束</h3>
-            <ul>
-              {problem.constraints.map((c) => (
-                <li key={c}>{c}</li>
-              ))}
-            </ul>
+            {ioNote ? (
+              <details className="statement__constraints">
+                <summary>输入 / 输出格式</summary>
+                <p style={{ whiteSpace: 'pre-wrap' }}>{ioNote}</p>
+              </details>
+            ) : null}
+            <details className="statement__constraints">
+              <summary>约束</summary>
+              <ul>
+                {problem.constraints.map((c) => (
+                  <li key={c}>{c}</li>
+                ))}
+              </ul>
+            </details>
           </section>
 
-          <section className="editor-pane">
+          <section className="editor-pane" aria-label="代码编辑器">
             <div className="editor-toolbar">
               <span className="editor-toolbar__lang">
                 C · 完整程序 · {problem.functionName}
