@@ -79,6 +79,7 @@ npm run preview
 - 首次加载约需下载 **clang.wasm / lld.wasm / sysroot**（合计约 90MB 量级），需联网
 - 底层经 browsercc 的 **clang++ / C++17**（`-fno-exceptions`）编译；请写可被 C++17 接受的 C 代码（勿用 GCC 嵌套函数等扩展）
 - WASI 环境无完整 POSIX 线程；请勿依赖文件、网络、多线程（stdin/stdout 可用）
+- 判题护栏（每用例）：运行超时 **2.5s**（「运行超时（可能死循环）」）；WASM 内存上限 **32MB**（「内存超限」）；stdout 上限 **256KB**；空提交 / 缺 `main` 立即 CE；编译超时 45s；重复提交会取消上一次运行
 
 ## 技术栈
 

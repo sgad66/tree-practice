@@ -6,7 +6,11 @@ import type {
   CaseResult,
 } from '../types'
 import { inferHint } from './hints'
-import { WASI, File, OpenFile, ConsoleStdout } from '@bjorn3/browser_wasi_shim'
+import type { WasRunRequest, WasRunResponse } from './wasiRunner.worker'
+import {
+  MEMORY_EXCEEDED_MESSAGE,
+  STDOUT_EXCEEDED_MESSAGE,
+} from './wasiRunner.worker'
 
 type CompileFn = (job: {
   source: string
@@ -17,15 +21,104 @@ type CompileFn = (job: {
 const BROWSERCC_CDN =
   'https://cdn.jsdelivr.net/npm/browsercc@0.1.1/dist/index.js'
 
+/** Per test-case wall-time limit for WASI execution (ms). */
+export const RUN_TIMEOUT_MS = 2500
+
+/** Wall-time limit for one compile job (ms). */
+export const COMPILE_TIMEOUT_MS = 45000
+
+/** Wall-time limit for loading the browsercc entry (ms). */
+export const TOOLCHAIN_LOAD_TIMEOUT_MS = 60000
+
+/** WASM linear-memory ceiling (bytes). Enforced via linker --max-memory. */
+export const MEMORY_LIMIT_BYTES = 32 * 1024 * 1024
+
+/** Cap captured stdout+stderr per case (bytes). */
+export const MAX_STDOUT_BYTES = 256 * 1024
+
+/** Truncate long compiler diagnostics shown in the UI. */
+export const MAX_COMPILE_OUTPUT_CHARS = 8000
+
+export const TIMEOUT_MESSAGE = '运行超时（可能死循环）'
+export const EMPTY_SUBMIT_MESSAGE =
+  '提交内容为空：请编写完整 C 程序（含 main）。'
+export const MISSING_MAIN_MESSAGE =
+  '未找到 main 函数：请编写完整 C 程序（含 main）。'
+export const COMPILE_TIMEOUT_MESSAGE = '编译超时：请简化代码后重试。'
+export const TOOLCHAIN_TIMEOUT_MESSAGE =
+  '工具链加载超时：请检查网络后刷新重试。'
+export const CANCELLED_MESSAGE = '已取消：检测到新的提交。'
+export { MEMORY_EXCEEDED_MESSAGE, STDOUT_EXCEEDED_MESSAGE }
+
 let compilePromise: Promise<CompileFn> | null = null
 let toolchainReady = false
 let warmed = false
 
+/** Monotonic generation so a newer submit cancels in-flight work. */
+let activeRunId = 0
+const activeWorkers = new Set<Worker>()
+
+export function cancelActiveRun(): void {
+  activeRunId += 1
+  for (const w of activeWorkers) {
+    try {
+      w.terminate()
+    } catch {
+      /* ignore */
+    }
+  }
+  activeWorkers.clear()
+}
+
+function isCancelled(runId: number): boolean {
+  return runId !== activeRunId
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  message: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms)
+    promise.then(
+      (v) => {
+        clearTimeout(timer)
+        resolve(v)
+      },
+      (e) => {
+        clearTimeout(timer)
+        reject(e)
+      },
+    )
+  })
+}
+
+function truncateCompileOutput(text: string): string {
+  const t = text.trim()
+  if (t.length <= MAX_COMPILE_OUTPUT_CHARS) return t
+  return `${t.slice(0, MAX_COMPILE_OUTPUT_CHARS)}\n…（编译输出过长，已截断）`
+}
+
+function classifyHostError(msg: string): string {
+  if (/运行超时|死循环/.test(msg)) return TIMEOUT_MESSAGE
+  if (/内存超限|out of memory|Unable to grow|failed to grow|oom/i.test(msg)) {
+    return MEMORY_EXCEEDED_MESSAGE
+  }
+  if (/输出超限/.test(msg)) return STDOUT_EXCEEDED_MESSAGE
+  if (/已取消/.test(msg)) return CANCELLED_MESSAGE
+  return msg
+}
+
 async function getCompile(): Promise<CompileFn> {
   if (!compilePromise) {
     compilePromise = (async () => {
-      const mod = (await import(
-        /* @vite-ignore */ BROWSERCC_CDN
+      const mod = (await withTimeout(
+        import(/* @vite-ignore */ BROWSERCC_CDN) as Promise<{
+          compile: CompileFn
+        }>,
+        TOOLCHAIN_LOAD_TIMEOUT_MS,
+        TOOLCHAIN_TIMEOUT_MESSAGE,
       )) as { compile: CompileFn }
       return mod.compile
     })()
@@ -43,11 +136,20 @@ async function warmCompileOnce(compile: CompileFn): Promise<void> {
   if (warmed) return
   warmed = true
   try {
-    await compile({
-      source: '#include <stdio.h>\nint main(void){puts("ok");return 0;}\n',
-      fileName: 'warm.cpp',
-      flags: ['-std=c++17', '-fno-exceptions', '-O0'],
-    })
+    await withTimeout(
+      compile({
+        source: '#include <stdio.h>\nint main(void){puts("ok");return 0;}\n',
+        fileName: 'warm.cpp',
+        flags: [
+          '-std=c++17',
+          '-fno-exceptions',
+          '-O0',
+          `-Wl,--max-memory=${MEMORY_LIMIT_BYTES}`,
+        ],
+      }),
+      COMPILE_TIMEOUT_MS,
+      COMPILE_TIMEOUT_MESSAGE,
+    )
   } catch {
     warmed = false
   }
@@ -187,109 +289,204 @@ function parseStdout(raw: string): { value?: JsonValue; error?: string } {
   }
 }
 
+function hasMainFunction(source: string): boolean {
+  // Strip // and /* */ comments roughly, then look for main(
+  const noBlock = source.replace(/\/\*[\s\S]*?\*\//g, ' ')
+  const noLine = noBlock.replace(/\/\/.*$/gm, ' ')
+  return /\bmain\s*\(/.test(noLine)
+}
+
+const COMPILE_FLAGS = [
+  '-std=c++17',
+  '-fno-exceptions',
+  '-O0',
+  '-Wno-unused-variable',
+  '-Wno-unused-function',
+  // Cap WASM linear memory so runaway malloc / recursion cannot grow forever.
+  `-Wl,--max-memory=${MEMORY_LIMIT_BYTES}`,
+]
+
+/**
+ * Run compiled WASM in a dedicated worker so a busy-loop can be aborted
+ * with worker.terminate() without freezing the UI thread.
+ */
 async function runWasm(
   module: WebAssembly.Module,
   stdinText: string,
+  runId: number,
+  timeoutMs: number = RUN_TIMEOUT_MS,
 ): Promise<{ stdout: string; stderr: string }> {
-  let stdout = ''
-  let stderr = ''
-  const stdinBytes = new TextEncoder().encode(stdinText)
-  const fds = [
-    new OpenFile(new File(stdinBytes)),
-    new ConsoleStdout((data: Uint8Array) => {
-      stdout += new TextDecoder().decode(data)
-    }),
-    new ConsoleStdout((data: Uint8Array) => {
-      stderr += new TextDecoder().decode(data)
-    }),
-  ]
-  const wasi = new WASI(['solution'], [], fds)
-  const instance = await WebAssembly.instantiate(module, {
-    wasi_snapshot_preview1: wasi.wasiImport,
+  if (isCancelled(runId)) throw new Error(CANCELLED_MESSAGE)
+
+  const worker = new Worker(
+    new URL('./wasiRunner.worker.ts', import.meta.url),
+    { type: 'module' },
+  )
+  activeWorkers.add(worker)
+
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (fn: () => void) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timer)
+      activeWorkers.delete(worker)
+      try {
+        worker.terminate()
+      } catch {
+        /* ignore */
+      }
+      fn()
+    }
+
+    const timer = window.setTimeout(() => {
+      finish(() => reject(new Error(TIMEOUT_MESSAGE)))
+    }, timeoutMs)
+
+    worker.onmessage = (ev: MessageEvent<WasRunResponse>) => {
+      finish(() => {
+        if (isCancelled(runId)) {
+          reject(new Error(CANCELLED_MESSAGE))
+          return
+        }
+        const data = ev.data
+        if (!data.ok) {
+          reject(new Error(classifyHostError(data.error || '运行失败')))
+          return
+        }
+        resolve({ stdout: data.stdout, stderr: data.stderr })
+      })
+    }
+
+    worker.onerror = (err) => {
+      finish(() => {
+        if (isCancelled(runId)) {
+          reject(new Error(CANCELLED_MESSAGE))
+          return
+        }
+        reject(
+          new Error(
+            classifyHostError(err.message || 'Worker 运行失败'),
+          ),
+        )
+      })
+    }
+
+    try {
+      const req: WasRunRequest = {
+        module,
+        stdin: stdinText,
+        maxStdoutBytes: MAX_STDOUT_BYTES,
+        memoryLimitBytes: MEMORY_LIMIT_BYTES,
+      }
+      worker.postMessage(req)
+    } catch (e) {
+      finish(() => {
+        reject(e instanceof Error ? e : new Error(String(e)))
+      })
+    }
   })
-  try {
-    wasi.start(instance as unknown as Parameters<WASI['start']>[0])
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    if (!/exit|Exit|proc_exit/i.test(msg) && stderr) {
-      throw new Error(stderr || msg)
-    }
-    if (!/exit|Exit|proc_exit/i.test(msg) && !stdout.trim()) {
-      throw new Error(stderr || msg)
-    }
-  }
-  return { stdout, stderr }
 }
 
 export async function runProblem(
   problem: Problem,
   userCode: string,
 ): Promise<RunResult> {
+  // New submit cancels any previous in-flight judge.
+  cancelActiveRun()
+  const runId = activeRunId
+
+  const failCompile = (compileError: string): RunResult => ({
+    ok: false,
+    compileError,
+    cases: [],
+    passedCount: 0,
+    totalCount: problem.tests.length,
+  })
+
+  if (!userCode.trim()) {
+    return failCompile(EMPTY_SUBMIT_MESSAGE)
+  }
+  if (!hasMainFunction(userCode)) {
+    return failCompile(MISSING_MAIN_MESSAGE)
+  }
+
   let compile: CompileFn
   try {
     compile = await getCompile()
+    if (isCancelled(runId)) return failCompile(CANCELLED_MESSAGE)
     toolchainReady = true
     await warmCompileOnce(compile)
+    if (isCancelled(runId)) return failCompile(CANCELLED_MESSAGE)
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    return {
-      ok: false,
-      compileError: `工具链加载失败：${msg}`,
-      cases: [],
-      passedCount: 0,
-      totalCount: problem.tests.length,
+    if (msg === TOOLCHAIN_TIMEOUT_MESSAGE || msg === COMPILE_TIMEOUT_MESSAGE) {
+      return failCompile(msg)
     }
+    return failCompile(`工具链加载失败：${msg}`)
   }
 
   // Compile the user's whole program as-is (must include main).
   let compiled: { compileOutput: string; module: WebAssembly.Module | null }
   try {
-    compiled = await compile({
-      source: userCode,
-      fileName: 'solution.cpp',
-      flags: [
-        '-std=c++17',
-        '-fno-exceptions',
-        '-O0',
-        '-Wno-unused-variable',
-        '-Wno-unused-function',
-      ],
-    })
+    compiled = await withTimeout(
+      compile({
+        source: userCode,
+        fileName: 'solution.cpp',
+        flags: COMPILE_FLAGS,
+      }),
+      COMPILE_TIMEOUT_MS,
+      COMPILE_TIMEOUT_MESSAGE,
+    )
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    return {
-      ok: false,
-      compileError: `编译器异常：${msg}`,
-      cases: [],
-      passedCount: 0,
-      totalCount: problem.tests.length,
-    }
+    if (msg === COMPILE_TIMEOUT_MESSAGE) return failCompile(msg)
+    return failCompile(`编译器异常：${msg}`)
   }
 
+  if (isCancelled(runId)) return failCompile(CANCELLED_MESSAGE)
+
   if (!compiled.module) {
-    return {
-      ok: false,
-      compileError: compiled.compileOutput?.trim() || '编译失败（无详细输出）',
-      cases: [],
-      passedCount: 0,
-      totalCount: problem.tests.length,
-    }
+    const raw = compiled.compileOutput?.trim() || '编译失败（无详细输出）'
+    return failCompile(truncateCompileOutput(raw))
   }
 
   const cases: CaseResult[] = []
   for (let index = 0; index < problem.tests.length; index++) {
+    if (isCancelled(runId)) {
+      return {
+        ok: false,
+        compileError: CANCELLED_MESSAGE,
+        cases,
+        passedCount: cases.filter((c) => c.passed).length,
+        totalCount: problem.tests.length,
+      }
+    }
+
     const t = problem.tests[index]
     const stdin = formatStdin(problem, t.args)
     let stdout = ''
     let runError: string | undefined
     try {
-      const result = await runWasm(compiled.module, stdin)
+      const result = await runWasm(compiled.module, stdin, runId)
       stdout = result.stdout
       if (!stdout.trim() && result.stderr.trim()) {
-        runError = result.stderr.trim()
+        runError = classifyHostError(result.stderr.trim())
       }
     } catch (e) {
-      runError = e instanceof Error ? e.message : String(e)
+      runError = classifyHostError(
+        e instanceof Error ? e.message : String(e),
+      )
+    }
+
+    if (runError === CANCELLED_MESSAGE || isCancelled(runId)) {
+      return {
+        ok: false,
+        compileError: CANCELLED_MESSAGE,
+        cases,
+        passedCount: cases.filter((c) => c.passed).length,
+        totalCount: problem.tests.length,
+      }
     }
 
     const expected = t.expected
@@ -327,4 +524,4 @@ export async function runProblem(
   }
 }
 
-export const PAGES_BUILD = '20261118T060000Z-empty-editor'
+export const PAGES_BUILD = '20261118T063000Z-judge-guards'

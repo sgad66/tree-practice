@@ -7,8 +7,9 @@ import {
   runProblem,
   preloadToolchain,
   ensureToolchain,
+  cancelActiveRun,
+  PAGES_BUILD,
 } from '../lib/clangJudge'
-import { PAGES_BUILD } from '../lib/clangJudge'
 import { markSolved } from '../lib/progress'
 
 interface Props {
@@ -76,18 +77,25 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
     localStorage.setItem(draftKey(problem.id), code)
   }, [code, problem.id])
 
+  const submitGenRef = useRef(0)
+
   async function handleSubmit(overrideCode?: string) {
+    // New submit cancels any in-flight judge (worker.terminate) so UI never sticks.
+    cancelActiveRun()
+    const gen = ++submitGenRef.current
     const currentProblem = problemRef.current
     const source = overrideCode ?? codeRef.current
     setRunning(true)
     setResult(null)
     try {
       const res = await runProblem(currentProblem, source)
+      if (gen !== submitGenRef.current) return
       setResult(res)
       if (res.ok) {
         onSolved(markSolved(currentProblem.id))
       }
     } catch (e) {
+      if (gen !== submitGenRef.current) return
       const msg = e instanceof Error ? e.message : String(e)
       setResult({
         ok: false,
@@ -97,7 +105,7 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
         totalCount: currentProblem.tests.length,
       })
     } finally {
-      setRunning(false)
+      if (gen === submitGenRef.current) setRunning(false)
     }
   }
 

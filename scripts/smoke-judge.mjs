@@ -160,18 +160,104 @@ if (afterReset.trim() !== '') {
 console.log('ready')
 
 async function run(code, label) {
+  const t0 = Date.now()
   await page.evaluate(async (src) => {
     await window.__treePractice.submit(src)
   }, code)
+  const elapsed = Date.now() - t0
   const result = await page.evaluate(() => window.__treePractice.getResult())
-  console.log(`=== ${label} ===`)
-  console.log(JSON.stringify({ ok: result?.ok, passed: result?.passedCount, total: result?.totalCount, compileError: result?.compileError?.slice?.(0, 200), actual0: result?.cases?.[0]?.actual }, null, 2))
-  return result
+  console.log(`=== ${label} === (${elapsed}ms)`)
+  console.log(
+    JSON.stringify(
+      {
+        ok: result?.ok,
+        passed: result?.passedCount,
+        total: result?.totalCount,
+        compileError: result?.compileError?.slice?.(0, 200),
+        actual0: result?.cases?.[0]?.actual,
+        error0: result?.cases?.[0]?.error,
+        hint0: result?.cases?.[0]?.hint,
+      },
+      null,
+      2,
+    ),
+  )
+  return { result, elapsed }
 }
 
-const bad = await run(BAD, 'BAD')
-const good = await run(GOOD, 'GOOD')
+const LOOP = `#include <stdio.h>
+int main(void) {
+  for (;;) { /* intentional infinite loop */ }
+  return 0;
+}
+`
 
+const MEMBOMB = `#include <stdlib.h>
+int main(void) {
+  for (;;) {
+    void *p = malloc(1024 * 1024);
+    if (!p) return 1;
+    ((volatile char *)p)[0] = 1;
+    ((volatile char *)p)[1024 * 1024 - 1] = 2;
+  }
+  return 0;
+}
+`
+
+const { result: empty } = await run('   \n\t  ', 'EMPTY')
+const emptyMsg = empty?.compileError || ''
+if (empty?.ok || !/提交内容为空/.test(emptyMsg)) {
+  console.error('FAIL: empty submit should CE with 提交内容为空, got', emptyMsg)
+  process.exitCode = 1
+} else {
+  console.log('empty submit ok')
+}
+
+const { result: noMain } = await run('#include <stdio.h>\nint x;\n', 'NOMAIN')
+const noMainMsg = noMain?.compileError || ''
+if (noMain?.ok || !/main/.test(noMainMsg)) {
+  console.error('FAIL: missing main should CE, got', noMainMsg)
+  process.exitCode = 1
+} else {
+  console.log('missing main ok')
+}
+
+const { result: loop, elapsed: loopMs } = await run(LOOP, 'LOOP')
+const loopErr = loop?.cases?.[0]?.error || ''
+const loopHint = loop?.cases?.[0]?.hint || ''
+const loopText = JSON.stringify(loop)
+if (loop?.ok) {
+  console.error('FAIL: infinite loop should not pass')
+  process.exitCode = 1
+} else if (!/运行超时|死循环/.test(loopErr + loopHint + loopText)) {
+  console.error('FAIL: expected timeout message, got', loopErr, loopHint)
+  process.exitCode = 1
+} else if (loopMs > 20000) {
+  console.error('FAIL: timeout took too long (UI may have frozen)', loopMs)
+  process.exitCode = 1
+} else {
+  console.log('loop timeout ok in', loopMs, 'ms')
+}
+
+const { result: mem, elapsed: memMs } = await run(MEMBOMB, 'MEM')
+const memErr = mem?.cases?.[0]?.error || ''
+const memHint = mem?.cases?.[0]?.hint || ''
+const memText = JSON.stringify(mem)
+if (mem?.ok) {
+  console.error('FAIL: memory bomb should not pass')
+  process.exitCode = 1
+} else if (!/内存超限|运行超时|死循环/.test(memErr + memHint + memText)) {
+  // Prefer 内存超限; timeout is acceptable if grow blocks until wall clock.
+  console.error('FAIL: expected 内存超限 (or timeout), got', memErr, memHint)
+  process.exitCode = 1
+} else if (memMs > 25000) {
+  console.error('FAIL: memory bomb took too long', memMs)
+  process.exitCode = 1
+} else {
+  console.log('memory bomb ok in', memMs, 'ms:', memErr || memHint)
+}
+
+const { result: bad } = await run(BAD, 'BAD')
 const badActual = bad?.cases?.[0]?.actual
 if (bad?.compileError) {
   console.error('FAIL: bad solution failed to compile', bad.compileError)
@@ -186,6 +272,7 @@ if (bad?.compileError) {
   console.log('bad actual ok:', badActual)
 }
 
+const { result: good } = await run(GOOD, 'GOOD')
 if (!good?.ok) {
   console.error('FAIL: good solution did not pass', good)
   process.exitCode = 1
