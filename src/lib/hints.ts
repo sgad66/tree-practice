@@ -18,6 +18,15 @@ export function inferHint(
   error?: string,
 ): string {
   if (error) {
+    if (/运行超时|死循环|timeout/i.test(error)) {
+      return '运行超时：检查是否有死循环，或递归缺少正确的终止条件。'
+    }
+    if (/内存超限|out of memory|oom/i.test(error)) {
+      return '内存超限：避免巨大数组/无限分配；检查递归是否失控导致栈或堆膨胀。'
+    }
+    if (/输出超限/.test(error)) {
+      return '输出过大：不要在循环里疯狂打印；只输出最终答案一行。'
+    }
     if (/null pointer|Segmentation|SIGSEGV|nil/i.test(error)) {
       return '空指针问题：解引用了 NULL。递归前先判断节点是否为空。'
     }

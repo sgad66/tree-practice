@@ -13,6 +13,7 @@ export function CodeEditor({ value, onChange }: Props) {
       <CodeMirror
         value={value}
         height="100%"
+        style={{ height: '100%', minHeight: 0 }}
         theme={oneDark}
         extensions={[cpp()]}
         onChange={onChange}

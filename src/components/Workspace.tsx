@@ -7,8 +7,9 @@ import {
   runProblem,
   preloadToolchain,
   ensureToolchain,
+  cancelActiveRun,
+  PAGES_BUILD,
 } from '../lib/clangJudge'
-import { PAGES_BUILD } from '../lib/clangJudge'
 import { markSolved } from '../lib/progress'
 
 interface Props {
@@ -18,7 +19,10 @@ interface Props {
   onBack: () => void
 }
 
-const draftKey = (id: string) => `tree-practice:draft:c-full:${id}`
+/** Editor starts empty; I/O rules live in the problem statement only. */
+const EMPTY_STARTER = ''
+
+const draftKey = (id: string) => `tree-practice:draft:c-blank:${id}`
 
 function difficultyClass(d: Problem['difficulty']): string {
   if (d === '简单') return 'badge badge--easy'
@@ -26,11 +30,22 @@ function difficultyClass(d: Problem['difficulty']): string {
   return 'badge badge--hard'
 }
 
+/** Keep the short problem lede above examples; tuck long I/O notes. */
+function splitStatement(text: string): { lede: string; ioNote: string } {
+  const marker = '【编写说明】'
+  const i = text.indexOf(marker)
+  if (i < 0) return { lede: text, ioNote: '' }
+  return {
+    lede: text.slice(0, i).trim(),
+    ioNote: text.slice(i).trim(),
+  }
+}
+
 export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
   const firstId = initialId ?? PROBLEMS[0]?.id ?? 'preorder'
   const [activeId, setActiveId] = useState(firstId)
   const problem = useMemo(() => getProblem(activeId) ?? PROBLEMS[0], [activeId])
-  const [code, setCode] = useState(problem.starterCode)
+  const [code, setCode] = useState(EMPTY_STARTER)
   const [result, setResult] = useState<RunResult | null>(null)
   const [running, setRunning] = useState(false)
   const [toolchainReady, setToolchainReady] = useState(false)
@@ -53,7 +68,8 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
 
   useEffect(() => {
     const saved = localStorage.getItem(draftKey(problem.id))
-    setCode(saved ?? problem.starterCode)
+    // Treat whitespace-only as empty; never fall back to a prefilled template.
+    setCode(saved && saved.trim() ? saved : EMPTY_STARTER)
     setResult(null)
   }, [problem])
 
@@ -61,18 +77,25 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
     localStorage.setItem(draftKey(problem.id), code)
   }, [code, problem.id])
 
+  const submitGenRef = useRef(0)
+
   async function handleSubmit(overrideCode?: string) {
+    // New submit cancels any in-flight judge (worker.terminate) so UI never sticks.
+    cancelActiveRun()
+    const gen = ++submitGenRef.current
     const currentProblem = problemRef.current
     const source = overrideCode ?? codeRef.current
     setRunning(true)
     setResult(null)
     try {
       const res = await runProblem(currentProblem, source)
+      if (gen !== submitGenRef.current) return
       setResult(res)
       if (res.ok) {
         onSolved(markSolved(currentProblem.id))
       }
     } catch (e) {
+      if (gen !== submitGenRef.current) return
       const msg = e instanceof Error ? e.message : String(e)
       setResult({
         ok: false,
@@ -82,7 +105,7 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
         totalCount: currentProblem.tests.length,
       })
     } finally {
-      setRunning(false)
+      if (gen === submitGenRef.current) setRunning(false)
     }
   }
 
@@ -103,9 +126,12 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
   })
 
   function resetCode() {
-    setCode(problem.starterCode)
+    setCode(EMPTY_STARTER)
+    localStorage.setItem(draftKey(problem.id), EMPTY_STARTER)
     setResult(null)
   }
+
+  const { lede, ioNote } = splitStatement(problem.statement)
 
   return (
     <div className="practice">
@@ -189,9 +215,11 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
               </span>
               <span className="statement__lang">C语言</span>
             </div>
-            <p style={{ whiteSpace: 'pre-wrap' }}>{problem.statement}</p>
+            <p className="statement__body" style={{ whiteSpace: 'pre-wrap' }}>
+              {lede}
+            </p>
             <p className="statement__io-callout">
-              请编写完整 C 程序（含 main）。判题编译运行整份程序：stdin 注入用例，比较 stdout。
+              请编写完整 C 程序（含 main）。判题经 stdin 注入用例，比较 stdout。
             </p>
             <h3>示例</h3>
             {problem.examples.map((ex, i) => (
@@ -201,15 +229,23 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
                 {ex.explanation && <div>说明：{ex.explanation}</div>}
               </div>
             ))}
-            <h3>约束</h3>
-            <ul>
-              {problem.constraints.map((c) => (
-                <li key={c}>{c}</li>
-              ))}
-            </ul>
+            {ioNote ? (
+              <details className="statement__constraints">
+                <summary>输入 / 输出格式</summary>
+                <p style={{ whiteSpace: 'pre-wrap' }}>{ioNote}</p>
+              </details>
+            ) : null}
+            <details className="statement__constraints">
+              <summary>约束</summary>
+              <ul>
+                {problem.constraints.map((c) => (
+                  <li key={c}>{c}</li>
+                ))}
+              </ul>
+            </details>
           </section>
 
-          <section className="editor-pane">
+          <section className="editor-pane" aria-label="代码编辑器">
             <div className="editor-toolbar">
               <span className="editor-toolbar__lang">
                 C · 完整程序 · {problem.functionName}
