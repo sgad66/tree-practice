@@ -170,19 +170,6 @@ export function isToolchainReady(): boolean {
   return toolchainReady
 }
 
-/** Canonical stdout line for an expected JSON value. */
-export function formatStdoutValue(v: JsonValue): string {
-  if (typeof v === 'boolean') return v ? 'true' : 'false'
-  if (typeof v === 'number') {
-    if (Number.isInteger(v)) return String(v)
-    // Match starter printf("%.10g")
-    return Number(v).toPrecision(10).replace(/\.?0+$/, '') === String(v)
-      ? String(v)
-      : JSON.stringify(v).replace(/^"|"$/g, '') || String(v)
-  }
-  return JSON.stringify(v)
-}
-
 function looksLikeTreeArr(a: JsonValue): a is (number | null)[] {
   return (
     Array.isArray(a) &&
@@ -191,9 +178,48 @@ function looksLikeTreeArr(a: JsonValue): a is (number | null)[] {
   )
 }
 
-function formatArgLine(arg: JsonValue, kind: CParamKind | undefined): string {
+function isMatrix(v: JsonValue): v is JsonValue[][] {
+  return Array.isArray(v) && v.every((row) => Array.isArray(row))
+}
+
+/** Display / compare form without JSON brackets. */
+export function formatStdoutValue(v: JsonValue): string {
+  if (v === null) return 'NULL'
+  if (typeof v === 'boolean') return v ? 'true' : 'false'
+  if (typeof v === 'number') {
+    if (Number.isInteger(v)) return String(v)
+    return String(v)
+  }
+  if (typeof v === 'string') return v
+  if (Array.isArray(v)) {
+    if (v.length === 0) return ''
+    if (isMatrix(v)) {
+      return v
+        .map((row) =>
+          (row as JsonValue[])
+            .map((x) => formatStdoutValue(x as JsonValue))
+            .join(' '),
+        )
+        .join('\n')
+    }
+    return v.map((x) => formatStdoutValue(x as JsonValue)).join(' ')
+  }
+  return String(v)
+}
+
+function formatToken(v: JsonValue): string {
+  if (v === null) return 'NULL'
+  if (typeof v === 'boolean') return v ? '1' : '0'
+  return String(v)
+}
+
+function formatSequence(arr: JsonValue[]): string {
+  return arr.map((x) => formatToken(x as JsonValue)).join(' ')
+}
+
+function formatArgBlock(arg: JsonValue, kind: CParamKind | undefined): string {
   if (kind === 'bool' || typeof arg === 'boolean') {
-    return arg ? 'true' : 'false'
+    return (arg as boolean) ? '1' : '0'
   }
   if (kind === 'string' || typeof arg === 'string') {
     return String(arg)
@@ -201,8 +227,16 @@ function formatArgLine(arg: JsonValue, kind: CParamKind | undefined): string {
   if (kind === 'int' || kind === 'float' || typeof arg === 'number') {
     return String(arg)
   }
-  // trees, arrays, matrices — JSON line (null stays null)
-  return JSON.stringify(arg)
+  if (kind === 'int_matrix' || kind === 'string_matrix' || isMatrix(arg)) {
+    const rows = arg as JsonValue[][]
+    // Each row on its own line; trailing blank line ends the matrix argument.
+    return rows.map((row) => formatSequence(row as JsonValue[])).join('\n') + '\n'
+  }
+  if (Array.isArray(arg)) {
+    // tree / int_array / tree-like — empty → blank line
+    return formatSequence(arg as JsonValue[])
+  }
+  return String(arg)
 }
 
 function prepareArgKind(
@@ -234,30 +268,29 @@ function prepareArgKind(
   return 'int'
 }
 
-/** Build stdin for one test case from problem ABI + args. */
+/** Build stdin for one test case from problem ABI + args (token dialect). */
 export function formatStdin(problem: Problem, args: JsonValue[]): string {
   const mode = problem.judgeMode ?? 'value'
-  const lines: string[] = []
+  const blocks: string[] = []
 
   if (mode === 'lca') {
-    // tree, pVal, qVal — each on its own line
-    lines.push(JSON.stringify(args[0] ?? []))
-    lines.push(String(args[1]))
-    lines.push(String(args[2]))
-    return lines.join('\n') + '\n'
+    blocks.push(formatSequence((args[0] as JsonValue[]) ?? []))
+    blocks.push(String(args[1]))
+    blocks.push(String(args[2]))
+    return blocks.join('\n') + '\n'
   }
 
   if (mode === 'serialize') {
-    lines.push(JSON.stringify(args[0] ?? []))
-    return lines.join('\n') + '\n'
+    blocks.push(formatSequence((args[0] as JsonValue[]) ?? []))
+    return blocks.join('\n') + '\n'
   }
 
   const paramKinds = problem.cAbi?.params?.map((p) => p.kind) ?? []
   args.forEach((arg, ai) => {
     const kind = prepareArgKind(mode, ai, arg, paramKinds[ai])
-    lines.push(formatArgLine(arg, kind))
+    blocks.push(formatArgBlock(arg, kind))
   })
-  return lines.join('\n') + '\n'
+  return blocks.join('\n') + '\n'
 }
 
 function deepEq(a: JsonValue, b: JsonValue): boolean {
@@ -265,28 +298,98 @@ function deepEq(a: JsonValue, b: JsonValue): boolean {
     if (Number.isNaN(a) && Number.isNaN(b)) return true
     return Math.abs(a - b) < 1e-6
   }
-  return JSON.stringify(a) === JSON.stringify(b)
+  if (a === null && b === null) return true
+  if (typeof a === 'boolean' && typeof b === 'boolean') return a === b
+  if (typeof a === 'boolean' && typeof b === 'number') return a === (b !== 0)
+  if (typeof b === 'boolean' && typeof a === 'number') return b === (a !== 0)
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false
+    return a.every((x, i) => deepEq(x as JsonValue, b[i] as JsonValue))
+  }
+  return a === b || JSON.stringify(a) === JSON.stringify(b)
 }
 
-function parseStdout(raw: string): { value?: JsonValue; error?: string } {
-  const text = raw.replace(/^\uFEFF/, '').trim()
-  if (!text) return { error: '程序无 stdout 输出' }
-  // Prefer last non-empty line (ignore debug prints)
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-  const last = lines[lines.length - 1] ?? text
-  try {
-    return { value: JSON.parse(last) as JsonValue }
-  } catch {
-    // bare identifier / non-JSON
-    if (last === 'true') return { value: true }
-    if (last === 'false') return { value: false }
-    if (last === 'null') return { value: null }
-    const num = Number(last)
-    if (last !== '' && !Number.isNaN(num) && /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(last)) {
-      return { value: num }
+function parseToken(tok: string): JsonValue {
+  if (/^null$/i.test(tok) || /^nil$/i.test(tok)) return null
+  if (/^true$/i.test(tok)) return true
+  if (/^false$/i.test(tok)) return false
+  if (/^-?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(tok)) return Number(tok)
+  return tok
+}
+
+function tokenizeAll(text: string): string[] {
+  return text
+    .trim()
+    .split(/[\s,]+/)
+    .map((t) => t.replace(/^\[|\]$/g, ''))
+    .filter((t) => t.length > 0)
+}
+
+/**
+ * Parse stdout against the expected shape.
+ * Flat lists accept space- or newline-separated tokens; matrices prefer
+ * one row per line, and also accept a flat token stream partitioned by
+ * expected row lengths.
+ */
+function parseStdout(
+  raw: string,
+  expected: JsonValue,
+): { value?: JsonValue; error?: string } {
+  const text = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const trimmed = text.trim()
+
+  if (Array.isArray(expected)) {
+    if (expected.length === 0) {
+      return { value: [] }
     }
-    return { value: last }
+
+    if (isMatrix(expected)) {
+      const lines = text
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0)
+      if (lines.length === expected.length) {
+        return {
+          value: lines.map((line) => tokenizeAll(line).map(parseToken)),
+        }
+      }
+      const toks = tokenizeAll(text)
+      const rows: JsonValue[] = []
+      let i = 0
+      for (const row of expected) {
+        const n = (row as JsonValue[]).length
+        rows.push(toks.slice(i, i + n).map(parseToken))
+        i += n
+      }
+      if (toks.length === 0 && expected.every((r) => (r as JsonValue[]).length === 0)) {
+        return { value: expected.map(() => []) }
+      }
+      if (i !== toks.length) {
+        // Still return partitioned rows so the UI can show actual; deepEq will fail.
+        return { value: rows }
+      }
+      return { value: rows }
+    }
+
+    // Flat array (numbers / nulls / mixed tokens)
+    if (!trimmed) return { value: [] }
+    return { value: tokenizeAll(text).map(parseToken) }
   }
+
+  if (!trimmed) return { error: '程序无 stdout 输出' }
+
+  // Scalars / strings: use the full trimmed text when expected is a string
+  // with spaces; otherwise prefer token stream (last token wins for debug noise).
+  if (typeof expected === 'string') {
+    // Strip optional surrounding quotes
+    const unquoted = trimmed.replace(/^"(.*)"$/s, '$1')
+    return { value: unquoted }
+  }
+
+  const toks = tokenizeAll(text)
+  if (toks.length === 0) return { error: '程序无 stdout 输出' }
+  const last = toks[toks.length - 1]!
+  return { value: parseToken(last) }
 }
 
 function hasMainFunction(source: string): boolean {
@@ -493,7 +596,7 @@ export async function runProblem(
     let actual: JsonValue | undefined
     let error = runError
     if (!error) {
-      const parsed = parseStdout(stdout)
+      const parsed = parseStdout(stdout, expected)
       if (parsed.error) error = parsed.error
       else actual = parsed.value
     }
@@ -524,4 +627,4 @@ export async function runProblem(
   }
 }
 
-export const PAGES_BUILD = '20261118T063000Z-judge-guards'
+export const PAGES_BUILD = '20261118T064500Z-simple-io'

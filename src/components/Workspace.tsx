@@ -219,7 +219,7 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
               {lede}
             </p>
             <p className="statement__io-callout">
-              请编写完整 C 程序（含 main）。判题经 stdin 注入用例，比较 stdout。
+              请编写完整 C 程序（含 main）。输入为数字与 NULL（空格分隔，无方括号）；输出同理，多行亦可。
             </p>
             <h3>示例</h3>
             {problem.examples.map((ex, i) => (

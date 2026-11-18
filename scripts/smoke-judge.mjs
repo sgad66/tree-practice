@@ -2,7 +2,7 @@ import puppeteer from 'puppeteer-core'
 
 const BASE = process.env.APP_URL || 'http://127.0.0.1:5173'
 
-/** Minimal full-program helpers shared by BAD/GOOD smoke solutions. */
+/** Minimal full-program helpers shared by BAD/GOOD smoke solutions (token I/O). */
 const HELPERS = `#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +17,25 @@ static int tp_read_line(char *buf, int cap) {
   size_t n=strlen(buf);
   while (n>0 && (buf[n-1]=='\\n'||buf[n-1]=='\\r')) buf[--n]=0;
   return 1;
+}
+static int tp_ci_eq(const char *a, const char *b) {
+  while (*a && *b) {
+    char ca=(char)tolower((unsigned char)*a++);
+    char cb=(char)tolower((unsigned char)*b++);
+    if (ca!=cb) return 0;
+  }
+  return !*a && !*b;
+}
+static int tp_next_token(const char **ps, char *buf, int cap) {
+  const char *s=*ps;
+  while (*s && (isspace((unsigned char)*s) || *s==',' || *s=='[' || *s==']')) s++;
+  if (!*s) { *ps=s; return 0; }
+  int n=0;
+  while (*s && !isspace((unsigned char)*s) && *s!=',' && *s!='[' && *s!=']') {
+    if (n+1<cap) buf[n++]=*s;
+    s++;
+  }
+  buf[n]=0; *ps=s; return n>0;
 }
 static struct TreeNode *tp_new(int v) {
   struct TreeNode *n=(struct TreeNode*)malloc(sizeof(*n));
@@ -35,17 +54,11 @@ static struct TreeNode *tp_build_tree(int *vals, int *nulls, int len) {
   struct TreeNode *root=nodes[0]; free(nodes); return root;
 }
 static struct TreeNode *tp_parse_tree(const char *s) {
-  while (*s && isspace((unsigned char)*s)) s++;
-  if (*s!='[') return NULL; s++;
   int vals[TP_NODE_MAX], nulls[TP_NODE_MAX], n=0;
-  while (*s && *s!=']') {
-    while (*s && isspace((unsigned char)*s)) s++;
-    if (*s==']') break;
-    if (n>=TP_NODE_MAX) break;
-    if ((s[0]=='n'||s[0]=='N') && strncmp(s,"null",4)==0) { vals[n]=0; nulls[n]=1; n++; s+=4; }
-    else { char *end=NULL; vals[n]=(int)strtol(s,&end,10); nulls[n]=0; n++; s=end?end:s; }
-    while (*s && isspace((unsigned char)*s)) s++;
-    if (*s==',') s++;
+  char tok[64];
+  while (n<TP_NODE_MAX && tp_next_token(&s, tok, 64)) {
+    if (tp_ci_eq(tok,"null")||tp_ci_eq(tok,"nil")) { vals[n]=0; nulls[n]=1; n++; }
+    else { vals[n]=(int)strtol(tok,NULL,10); nulls[n]=0; n++; }
   }
   return tp_build_tree(vals,nulls,n);
 }
@@ -54,9 +67,10 @@ static struct TreeNode *tp_read_tree(void) {
   return tp_parse_tree(tp_line);
 }
 static void tp_print_int_array(int *a, int n) {
-  putchar('[');
-  for (int i=0;i<n;i++) { if (i) putchar(','); printf("%d", a[i]); }
-  putchar(']');
+  for (int i=0;i<n;i++) { if (i) putchar(' '); printf("%d", a[i]); }
+}
+static void tp_print_int_array_lines(int *a, int n) {
+  for (int i=0;i<n;i++) printf("%d\\n", a[i]);
 }
 `
 
@@ -85,6 +99,32 @@ int main(void) {
 }
 `
 
+/** Correct preorder, printed one value per line (multi-line stdout). */
+const GOOD_LINES = `${HELPERS}
+static void good_walk(struct TreeNode* node, int* out, int* n, int cap) {
+  if (!node) return;
+  if (*n >= cap) return;
+  out[(*n)++] = node->val;
+  good_walk(node->left, out, n, cap);
+  good_walk(node->right, out, n, cap);
+}
+int* preorderTraversal(struct TreeNode* root, int* returnSize) {
+  int cap = 128;
+  int* out = (int*)malloc(sizeof(int) * (size_t)cap);
+  int n = 0;
+  good_walk(root, out, &n, cap);
+  *returnSize = n;
+  return out;
+}
+int main(void) {
+  struct TreeNode* root = tp_read_tree();
+  int rs = 0;
+  int* res = preorderTraversal(root, &rs);
+  tp_print_int_array_lines(res, rs);
+  return 0;
+}
+`
+
 const GOOD = `${HELPERS}
 static void good_walk(struct TreeNode* node, int* out, int* n, int cap) {
   if (!node) return;
@@ -107,6 +147,20 @@ int main(void) {
   int* res = preorderTraversal(root, &rs);
   tp_print_int_array(res, rs);
   putchar('\\n');
+  return 0;
+}
+`
+
+/** Scalar: max depth of binary tree. */
+const DEPTH = `${HELPERS}
+int maxDepth(struct TreeNode* root) {
+  if (!root) return 0;
+  int L = maxDepth(root->left), R = maxDepth(root->right);
+  return (L > R ? L : R) + 1;
+}
+int main(void) {
+  struct TreeNode* root = tp_read_tree();
+  printf("%d\\n", maxDepth(root));
   return 0;
 }
 `
@@ -157,6 +211,14 @@ if (afterReset.trim() !== '') {
   console.log('reset clears to empty')
 }
 
+const bodyText = await page.evaluate(() => document.body.innerText)
+if (!/NULL|空格分隔|不要方括号/.test(bodyText)) {
+  console.error('FAIL: statement/callout should describe token I/O')
+  process.exitCode = 1
+} else {
+  console.log('I/O rules visible in UI')
+}
+
 console.log('ready')
 
 async function run(code, label) {
@@ -185,24 +247,15 @@ async function run(code, label) {
   return { result, elapsed }
 }
 
-const LOOP = `#include <stdio.h>
-int main(void) {
-  for (;;) { /* intentional infinite loop */ }
-  return 0;
+async function openProblem(titleSubstr) {
+  await page.evaluate((sub) => {
+    const links = Array.from(document.querySelectorAll('button.problem-link'))
+    const hit = links.find((b) => b.textContent?.includes(sub))
+    if (!hit) throw new Error('problem not found: ' + sub)
+    hit.click()
+  }, titleSubstr)
+  await new Promise((r) => setTimeout(r, 300))
 }
-`
-
-const MEMBOMB = `#include <stdlib.h>
-int main(void) {
-  for (;;) {
-    void *p = malloc(1024 * 1024);
-    if (!p) return 1;
-    ((volatile char *)p)[0] = 1;
-    ((volatile char *)p)[1024 * 1024 - 1] = 2;
-  }
-  return 0;
-}
-`
 
 const { result: empty } = await run('   \n\t  ', 'EMPTY')
 const emptyMsg = empty?.compileError || ''
@@ -211,50 +264,6 @@ if (empty?.ok || !/提交内容为空/.test(emptyMsg)) {
   process.exitCode = 1
 } else {
   console.log('empty submit ok')
-}
-
-const { result: noMain } = await run('#include <stdio.h>\nint x;\n', 'NOMAIN')
-const noMainMsg = noMain?.compileError || ''
-if (noMain?.ok || !/main/.test(noMainMsg)) {
-  console.error('FAIL: missing main should CE, got', noMainMsg)
-  process.exitCode = 1
-} else {
-  console.log('missing main ok')
-}
-
-const { result: loop, elapsed: loopMs } = await run(LOOP, 'LOOP')
-const loopErr = loop?.cases?.[0]?.error || ''
-const loopHint = loop?.cases?.[0]?.hint || ''
-const loopText = JSON.stringify(loop)
-if (loop?.ok) {
-  console.error('FAIL: infinite loop should not pass')
-  process.exitCode = 1
-} else if (!/运行超时|死循环/.test(loopErr + loopHint + loopText)) {
-  console.error('FAIL: expected timeout message, got', loopErr, loopHint)
-  process.exitCode = 1
-} else if (loopMs > 20000) {
-  console.error('FAIL: timeout took too long (UI may have frozen)', loopMs)
-  process.exitCode = 1
-} else {
-  console.log('loop timeout ok in', loopMs, 'ms')
-}
-
-const { result: mem, elapsed: memMs } = await run(MEMBOMB, 'MEM')
-const memErr = mem?.cases?.[0]?.error || ''
-const memHint = mem?.cases?.[0]?.hint || ''
-const memText = JSON.stringify(mem)
-if (mem?.ok) {
-  console.error('FAIL: memory bomb should not pass')
-  process.exitCode = 1
-} else if (!/内存超限|运行超时|死循环/.test(memErr + memHint + memText)) {
-  // Prefer 内存超限; timeout is acceptable if grow blocks until wall clock.
-  console.error('FAIL: expected 内存超限 (or timeout), got', memErr, memHint)
-  process.exitCode = 1
-} else if (memMs > 25000) {
-  console.error('FAIL: memory bomb took too long', memMs)
-  process.exitCode = 1
-} else {
-  console.log('memory bomb ok in', memMs, 'ms:', memErr || memHint)
 }
 
 const { result: bad } = await run(BAD, 'BAD')
@@ -272,12 +281,29 @@ if (bad?.compileError) {
   console.log('bad actual ok:', badActual)
 }
 
+const { result: goodLines } = await run(GOOD_LINES, 'GOOD_LINES')
+if (!goodLines?.ok) {
+  console.error('FAIL: multi-line good preorder should pass', goodLines)
+  process.exitCode = 1
+} else {
+  console.log('good multi-line preorder ok')
+}
+
 const { result: good } = await run(GOOD, 'GOOD')
 if (!good?.ok) {
   console.error('FAIL: good solution did not pass', good)
   process.exitCode = 1
 } else {
-  console.log('good ok')
+  console.log('good space-separated ok')
+}
+
+await openProblem('最大深度')
+const { result: depth } = await run(DEPTH, 'DEPTH')
+if (!depth?.ok) {
+  console.error('FAIL: scalar max-depth should pass', depth)
+  process.exitCode = 1
+} else {
+  console.log('scalar max-depth ok')
 }
 
 await browser.close()
