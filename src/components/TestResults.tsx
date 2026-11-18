@@ -1,4 +1,5 @@
-import type { RunResult } from '../types'
+import type { JsonValue, RunResult } from '../types'
+import { formatStdoutValue } from '../lib/clangJudge'
 
 interface Props {
   result: RunResult | null
@@ -8,12 +9,7 @@ interface Props {
 
 function fmt(v: unknown): string {
   if (v === undefined) return '（无返回值）'
-  if (v === null) return 'null'
-  try {
-    return JSON.stringify(v)
-  } catch {
-    return String(v)
-  }
+  return formatStdoutValue(v as JsonValue) || '（空）'
 }
 
 export function TestResults({ result, running, toolchainReady }: Props) {

@@ -131,12 +131,68 @@ def analyze_c_abi(sig: str) -> dict:
 IO_NOTE = (
     "【编写说明】请编写完整 C 程序（含 main）。判题编译并运行你的整份程序："
     "每个用例经 stdin 注入输入，比较 stdout 与期望。\n"
-    "【输入格式】stdin，每个参数一行："
-    "树为层序数组如 [3,9,20,null,null,15,7]（空树 []）；"
-    "整数/浮点/布尔各占一行（布尔 true/false）；"
-    "一维数组 [1,2,3]；二维数组 [[1,2],[3,4]]；字符串一行原文。\n"
-    "【输出格式】stdout 一行：整数、true/false、层序数组，或 JSON 风格数组/字符串（与示例一致）。"
+    "【输入格式】不要方括号与 JSON。每个参数占一行（二维数组见下）：\n"
+    "- 树（层序）/ 一维数组：空格分隔的数字与 NULL（大小写均可），"
+    "例如 `3 9 20 NULL NULL 15 7`；空树或空数组输出空行\n"
+    "- 整数 / 浮点：一行一个数\n"
+    "- 布尔：`1` / `0`（也接受 true/false）\n"
+    "- 字符串：一行原文\n"
+    "- 二维数组：每一行一组空格分隔数字，该参数结束后再给一个空行\n"
+    "【输出格式】不要方括号与逗号：\n"
+    "- 单值：一行（整数 / true/false / 字符串原文）\n"
+    "- 一维序列或层序树：空格分隔（缺子用 NULL），或每值一行均可\n"
+    "- 二维：每一行一组空格分隔数字\n"
+    "判题会忽略行末空格与换行差异，按 token 比较。"
 )
+
+
+def fmt_io_token(v: Any) -> str:
+    if v is None:
+        return "NULL"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, float):
+        if abs(v - round(v)) < 1e-9:
+            return str(int(round(v)))
+        return f"{v:.10g}".rstrip("0").rstrip(".") if "." in f"{v:.10g}" else f"{v:.10g}"
+    return str(v)
+
+
+def fmt_io_value(v: Any) -> str:
+    """Human / stdout display without JSON brackets."""
+    if isinstance(v, list):
+        if not v:
+            return ""
+        if any(isinstance(x, list) for x in v):
+            return "\n".join(
+                fmt_io_value(row) if isinstance(row, list) else fmt_io_token(row)
+                for row in v
+            )
+        return " ".join(fmt_io_token(x) for x in v)
+    return fmt_io_token(v)
+
+
+def fmt_io_input_label(args: list[Any]) -> str:
+    parts: list[str] = []
+    for a in args:
+        if isinstance(a, list) and a and any(isinstance(x, list) for x in a):
+            parts.append(fmt_io_value(a).replace("\n", " / "))
+        else:
+            text = fmt_io_value(a)
+            parts.append(text if text != "" else "(空)")
+    return " · ".join(parts)
+
+
+def fmt_io_example_input(args: list[Any]) -> str:
+    chunks: list[str] = []
+    for a in args:
+        if isinstance(a, list) and a and any(isinstance(x, list) for x in a):
+            chunks.append(fmt_io_value(a))
+        else:
+            text = fmt_io_value(a)
+            chunks.append(text)  # empty tree → blank line preserved below
+    # Join args with newline; empty string args become blank lines.
+    return "\n".join(chunks)
 
 DEFAULT_CONSTRAINTS = [
     "请编写完整 C 程序（含 main）；不要依赖判题替你写入口",
@@ -200,28 +256,45 @@ static struct TreeNode *tp_build_tree(int *vals, int *nulls, int len) {
     return root;
 }
 
+static int tp_ci_eq(const char *a, const char *b) {
+    while (*a && *b) {
+        char ca = (char)tolower((unsigned char)*a++);
+        char cb = (char)tolower((unsigned char)*b++);
+        if (ca != cb) return 0;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static int tp_is_null_token(const char *s) {
+    return tp_ci_eq(s, "null") || tp_ci_eq(s, "nil");
+}
+
+/* Parse space/comma separated tokens; optional legacy [ ... ] wrappers. */
+static int tp_next_token(const char **ps, char *buf, int cap) {
+    const char *s = *ps;
+    while (*s && (isspace((unsigned char)*s) || *s == ',' || *s == '[' || *s == ']')) s++;
+    if (!*s) { *ps = s; return 0; }
+    int n = 0;
+    while (*s && !isspace((unsigned char)*s) && *s != ',' && *s != '[' && *s != ']') {
+        if (n + 1 < cap) buf[n++] = *s;
+        s++;
+    }
+    buf[n] = '\0';
+    *ps = s;
+    return n > 0;
+}
+
 static struct TreeNode *tp_parse_tree(const char *s) {
-    while (*s && isspace((unsigned char)*s)) s++;
-    if (*s != '[') return NULL;
-    s++;
     int vals[TP_NODE_MAX];
     int nulls[TP_NODE_MAX];
     int n = 0;
-    while (*s && *s != ']') {
-        while (*s && isspace((unsigned char)*s)) s++;
-        if (*s == ']') break;
-        if (n >= TP_NODE_MAX) break;
-        if ((s[0] == 'n' || s[0] == 'N') && strncmp(s, "null", 4) == 0) {
+    char tok[64];
+    while (n < TP_NODE_MAX && tp_next_token(&s, tok, (int)sizeof(tok))) {
+        if (tp_is_null_token(tok)) {
             vals[n] = 0; nulls[n] = 1; n++;
-            s += 4;
         } else {
-            char *end = NULL;
-            long v = strtol(s, &end, 10);
-            vals[n] = (int)v; nulls[n] = 0; n++;
-            s = end ? end : s;
+            vals[n] = (int)strtol(tok, NULL, 10); nulls[n] = 0; n++;
         }
-        while (*s && isspace((unsigned char)*s)) s++;
-        if (*s == ',') s++;
     }
     return tp_build_tree(vals, nulls, n);
 }
@@ -243,7 +316,9 @@ static double tp_read_double(void) {
 
 static bool tp_read_bool(void) {
     if (!tp_read_line(tp_line, TP_LINE_MAX)) return false;
-    return tp_line[0] == 't' || tp_line[0] == 'T' || strcmp(tp_line, "1") == 0;
+    if (tp_line[0] == 't' || tp_line[0] == 'T') return true;
+    if (tp_line[0] == 'f' || tp_line[0] == 'F') return false;
+    return strcmp(tp_line, "1") == 0;
 }
 
 static char *tp_read_string(void) {
@@ -260,20 +335,12 @@ static char *tp_read_string(void) {
 
 static int *tp_parse_int_array(const char *s, int *out_len) {
     *out_len = 0;
-    while (*s && isspace((unsigned char)*s)) s++;
-    if (*s != '[') return NULL;
-    s++;
     int *buf = (int *)malloc(sizeof(int) * TP_NODE_MAX);
     int n = 0;
-    while (*s && *s != ']') {
-        while (*s && isspace((unsigned char)*s)) s++;
-        if (*s == ']') break;
-        char *end = NULL;
-        long v = strtol(s, &end, 10);
-        if (n < TP_NODE_MAX) buf[n++] = (int)v;
-        s = end ? end : s;
-        while (*s && isspace((unsigned char)*s)) s++;
-        if (*s == ',') s++;
+    char tok[64];
+    while (n < TP_NODE_MAX && tp_next_token(&s, tok, (int)sizeof(tok))) {
+        if (tp_is_null_token(tok)) continue;
+        buf[n++] = (int)strtol(tok, NULL, 10);
     }
     *out_len = n;
     return buf;
@@ -287,61 +354,29 @@ static int *tp_read_int_array(int *out_len) {
 static double *tp_read_double_array(int *out_len) {
     if (!tp_read_line(tp_line, TP_LINE_MAX)) { *out_len = 0; return NULL; }
     const char *s = tp_line;
-    while (*s && isspace((unsigned char)*s)) s++;
-    if (*s != '[') { *out_len = 0; return NULL; }
-    s++;
     double *buf = (double *)malloc(sizeof(double) * TP_NODE_MAX);
     int n = 0;
-    while (*s && *s != ']') {
-        while (*s && isspace((unsigned char)*s)) s++;
-        if (*s == ']') break;
-        char *end = NULL;
-        double v = strtod(s, &end);
-        if (n < TP_NODE_MAX) buf[n++] = v;
-        s = end ? end : s;
-        while (*s && isspace((unsigned char)*s)) s++;
-        if (*s == ',') s++;
+    char tok[64];
+    while (n < TP_NODE_MAX && tp_next_token(&s, tok, (int)sizeof(tok))) {
+        buf[n++] = strtod(tok, NULL);
     }
     *out_len = n;
     return buf;
 }
 
+/* Rows until a blank line or EOF (each row: space-separated ints). */
 static int **tp_read_int_matrix(int *out_rows, int **out_cols) {
-    if (!tp_read_line(tp_line, TP_LINE_MAX)) { *out_rows = 0; *out_cols = NULL; return NULL; }
-    const char *s = tp_line;
-    while (*s && isspace((unsigned char)*s)) s++;
-    if (*s != '[') { *out_rows = 0; *out_cols = NULL; return NULL; }
-    s++;
     int **rows = (int **)malloc(sizeof(int *) * TP_NODE_MAX);
     int *cols = (int *)malloc(sizeof(int) * TP_NODE_MAX);
     int r = 0;
-    while (*s && *s != ']') {
+    while (r < TP_NODE_MAX && tp_read_line(tp_line, TP_LINE_MAX)) {
+        const char *s = tp_line;
         while (*s && isspace((unsigned char)*s)) s++;
-        if (*s == ']') break;
-        if (*s != '[') break;
-        const char *row_start = s;
-        int depth = 0;
-        const char *p = s;
-        for (; *p; p++) {
-            if (*p == '[') depth++;
-            else if (*p == ']') {
-                depth--;
-                if (depth == 0) { p++; break; }
-            }
-        }
-        /* temporary NUL-terminate row slice for parser */
-        char saved = tp_line[p - tp_line];
-        ((char *)p)[0] = '\0';
+        if (!*s) break; /* blank line ends the matrix argument */
         int len = 0;
-        int *row = tp_parse_int_array(row_start, &len);
-        ((char *)p)[0] = saved;
-        s = p;
-        while (*s && isspace((unsigned char)*s)) s++;
-        if (*s == ',') s++;
-        rows[r] = row;
+        rows[r] = tp_parse_int_array(tp_line, &len);
         cols[r] = len;
         r++;
-        if (r >= TP_NODE_MAX) break;
     }
     *out_rows = r;
     *out_cols = cols;
@@ -357,70 +392,51 @@ static struct TreeNode *tp_find_node(struct TreeNode *root, int val) {
 }
 
 static void tp_print_string(const char *s) {
-    if (!s) { printf("null"); return; }
-    putchar('"');
-    for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
-        unsigned char c = *p;
-        if (c == '"' || c == '\\') { putchar('\\'); putchar((char)c); }
-        else if (c == '\n') { putchar('\\'); putchar('n'); }
-        else putchar((char)c);
-    }
-    putchar('"');
+    if (!s) { printf("NULL"); return; }
+    fputs(s, stdout);
 }
 
 static void tp_print_int_array(int *a, int n) {
-    putchar('[');
     for (int i = 0; i < n; i++) {
-        if (i) putchar(',');
+        if (i) putchar(' ');
         printf("%d", a[i]);
     }
-    putchar(']');
 }
 
 static void tp_print_double_array(double *a, int n) {
-    putchar('[');
     for (int i = 0; i < n; i++) {
-        if (i) putchar(',');
+        if (i) putchar(' ');
         printf("%.10g", a[i]);
     }
-    putchar(']');
 }
 
 static void tp_print_string_array(char **a, int n) {
-    putchar('[');
     for (int i = 0; i < n; i++) {
-        if (i) putchar(',');
+        if (i) putchar(' ');
         tp_print_string(a ? a[i] : NULL);
     }
-    putchar(']');
 }
 
 static void tp_print_int_matrix(int **a, int rows, int *cols) {
-    putchar('[');
     for (int i = 0; i < rows; i++) {
-        if (i) putchar(',');
+        if (i) putchar('\n');
         tp_print_int_array(a ? a[i] : NULL, cols ? cols[i] : 0);
     }
-    putchar(']');
 }
 
 static void tp_print_string_matrix(char ***a, int rows, int *cols) {
-    putchar('[');
     for (int r = 0; r < rows; r++) {
-        if (r) putchar(',');
-        putchar('[');
+        if (r) putchar('\n');
         int cmax = cols ? cols[r] : 0;
         for (int c = 0; c < cmax; c++) {
-            if (c) putchar(',');
+            if (c) putchar(' ');
             tp_print_string(a && a[r] ? a[r][c] : NULL);
         }
-        putchar(']');
     }
-    putchar(']');
 }
 
 static void tp_print_tree(struct TreeNode *root) {
-    if (!root) { printf("[]"); return; }
+    if (!root) return;
     struct TreeNode **q = (struct TreeNode **)malloc(sizeof(struct TreeNode *) * TP_NODE_MAX);
     int *out_vals = (int *)malloc(sizeof(int) * TP_NODE_MAX);
     int *out_null = (int *)malloc(sizeof(int) * TP_NODE_MAX);
@@ -436,13 +452,11 @@ static void tp_print_tree(struct TreeNode *root) {
         }
     }
     while (on > 0 && out_null[on - 1]) on--;
-    putchar('[');
     for (int i = 0; i < on; i++) {
-        if (i) putchar(',');
-        if (out_null[i]) printf("null");
+        if (i) putchar(' ');
+        if (out_null[i]) printf("NULL");
         else printf("%d", out_vals[i]);
     }
-    putchar(']');
     free(q); free(out_vals); free(out_null);
 }
 
@@ -587,7 +601,7 @@ def _emit_main(fn: str, sig: str, mode: str) -> str:
         lines.append("    struct TreeNode* p = tp_find_node(root, pVal);")
         lines.append("    struct TreeNode* q = tp_find_node(root, qVal);")
         lines.append(f"    struct TreeNode* res = {fn}(root, p, q);")
-        lines.append('    if (res) printf("%d\\n", res->val); else printf("null\\n");')
+        lines.append('    if (res) printf("%d\\n", res->val); else printf("NULL\\n");')
         lines.append("    return 0;")
         lines.append("}")
         return "\n".join(lines) + "\n"
@@ -644,10 +658,10 @@ def _emit_main(fn: str, sig: str, mode: str) -> str:
         lines.append("    putchar('\\n');")
     elif ret_kind == "optional_int":
         lines.append(f"    int* res = {fn}({', '.join(call_args)});")
-        lines.append('    if (res) printf("%d\\n", *res); else printf("null\\n");')
+        lines.append('    if (res) printf("%d\\n", *res); else printf("NULL\\n");')
     else:
         lines.append(f"    /* unsupported return */ (void){fn};")
-        lines.append('    printf("null\\n");')
+        lines.append('    printf("NULL\\n");')
 
     lines.append("    return 0;")
     lines.append("}")
@@ -4017,7 +4031,7 @@ def materialize(prob: ProblemDef) -> dict:
         if isinstance(exp, float):
             exp = float(exp)
         entry = {
-            "inputLabel": t["inputLabel"],
+            "inputLabel": fmt_io_input_label(t["args"]),
             "args": t["args"],
             "expected": exp,
         }
@@ -4027,11 +4041,38 @@ def materialize(prob: ProblemDef) -> dict:
             entry["hint"] = t["hint"]
         tests.append(entry)
 
-    # refresh example outputs from first sample when possible
-    examples = prob["examples"]
+    # Rebuild examples from sample tests in the simplified I/O dialect.
+    old_examples = prob.get("examples") or []
+    examples = []
+    sample_i = 0
+    for t in tests:
+        if not t.get("sample"):
+            continue
+        ex = {
+            "input": fmt_io_example_input(t["args"]),
+            "output": fmt_io_value(t["expected"]),
+        }
+        if sample_i < len(old_examples) and old_examples[sample_i].get("explanation"):
+            ex["explanation"] = old_examples[sample_i]["explanation"]
+        examples.append(ex)
+        sample_i += 1
+        if len(examples) >= 2:
+            break
+    if not examples and old_examples:
+        # Fallback: at least keep one converted placeholder
+        examples = [
+            {
+                "input": fmt_io_example_input(tests[0]["args"]) if tests else "",
+                "output": fmt_io_value(tests[0]["expected"]) if tests else "",
+            }
+        ]
+
     statement = prob["statement"].rstrip()
-    if "请编写完整 C 程序" not in statement:
-        statement = statement + "\n\n" + IO_NOTE
+    # Drop any previous I/O appendix, then attach the current note.
+    marker = "【编写说明】"
+    if marker in statement:
+        statement = statement.split(marker, 1)[0].rstrip()
+    statement = statement + "\n\n" + IO_NOTE
     out = {
         "id": prob["id"],
         "title": prob["title"],

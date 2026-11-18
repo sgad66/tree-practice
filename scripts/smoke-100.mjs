@@ -34,18 +34,31 @@ static struct TreeNode *tp_build_tree(int *vals, int *nulls, int len) {
   }
   struct TreeNode *root=nodes[0]; free(nodes); return root;
 }
+static int tp_ci_eq(const char *a, const char *b) {
+  while (*a && *b) {
+    char ca=(char)tolower((unsigned char)*a++);
+    char cb=(char)tolower((unsigned char)*b++);
+    if (ca!=cb) return 0;
+  }
+  return !*a && !*b;
+}
+static int tp_next_token(const char **ps, char *buf, int cap) {
+  const char *s=*ps;
+  while (*s && (isspace((unsigned char)*s) || *s==',' || *s=='[' || *s==']')) s++;
+  if (!*s) { *ps=s; return 0; }
+  int n=0;
+  while (*s && !isspace((unsigned char)*s) && *s!=',' && *s!='[' && *s!=']') {
+    if (n+1<cap) buf[n++]=*s;
+    s++;
+  }
+  buf[n]=0; *ps=s; return n>0;
+}
 static struct TreeNode *tp_parse_tree(const char *s) {
-  while (*s && isspace((unsigned char)*s)) s++;
-  if (*s!='[') return NULL; s++;
   int vals[TP_NODE_MAX], nulls[TP_NODE_MAX], n=0;
-  while (*s && *s!=']') {
-    while (*s && isspace((unsigned char)*s)) s++;
-    if (*s==']') break;
-    if (n>=TP_NODE_MAX) break;
-    if ((s[0]=='n'||s[0]=='N') && strncmp(s,"null",4)==0) { vals[n]=0; nulls[n]=1; n++; s+=4; }
-    else { char *end=NULL; vals[n]=(int)strtol(s,&end,10); nulls[n]=0; n++; s=end?end:s; }
-    while (*s && isspace((unsigned char)*s)) s++;
-    if (*s==',') s++;
+  char tok[64];
+  while (n<TP_NODE_MAX && tp_next_token(&s, tok, 64)) {
+    if (tp_ci_eq(tok,"null")||tp_ci_eq(tok,"nil")) { vals[n]=0; nulls[n]=1; n++; }
+    else { vals[n]=(int)strtol(tok,NULL,10); nulls[n]=0; n++; }
   }
   return tp_build_tree(vals,nulls,n);
 }
@@ -54,14 +67,13 @@ static struct TreeNode *tp_read_tree(void) {
   return tp_parse_tree(tp_line);
 }
 static void tp_print_int_array(int *a, int n) {
-  putchar('[');
-  for (int i=0;i<n;i++) { if (i) putchar(','); printf("%d", a[i]); }
-  putchar(']');
+  for (int i=0;i<n;i++) { if (i) putchar(' '); printf("%d", a[i]); }
 }
 static void tp_print_int_matrix(int **a, int rows, int *cols) {
-  putchar('[');
-  for (int i=0;i<rows;i++) { if (i) putchar(','); tp_print_int_array(a?a[i]:NULL, cols?cols[i]:0); }
-  putchar(']');
+  for (int i=0;i<rows;i++) {
+    if (i) putchar('\\n');
+    tp_print_int_array(a?a[i]:NULL, cols?cols[i]:0);
+  }
 }
 `
 

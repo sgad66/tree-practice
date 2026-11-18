@@ -13,16 +13,17 @@ export type TopicId =
 /**
  * How stdin args are interpreted / expected stdout is shaped.
  * Judge compiles the user's full program and feeds each test via stdin.
+ * I/O dialect: space/newline-separated numbers and NULL (no JSON brackets).
  */
 export type JudgeMode =
-  | 'value' // first list-looking arg → tree line; compare stdout JSON
-  | 'trees' // every list-looking arg → tree line
-  | 'tree_return' // like value; stdout is level-order tree
-  | 'trees_return' // every list-looking arg → tree; stdout tree
-  | 'raw' // keep arrays as array lines
-  | 'raw_tree_return' // keep arrays; stdout tree
+  | 'value' // first list-looking arg → tree tokens; compare stdout tokens
+  | 'trees' // every list-looking arg → tree tokens
+  | 'tree_return' // like value; stdout is level-order tree tokens
+  | 'trees_return' // every list-looking arg → tree; stdout tree tokens
+  | 'raw' // keep arrays as token lines
+  | 'raw_tree_return' // keep arrays; stdout tree tokens
   | 'lca' // stdin: tree, pVal, qVal → stdout node value
-  | 'serialize' // stdin tree; stdout round-trip tree
+  | 'serialize' // stdin tree; stdout round-trip tree tokens
 
 export type CParamKind =
   | 'tree'
@@ -67,9 +68,9 @@ export type JsonValue =
 export interface TestCase {
   /** Human-readable input description for sample / failure UI */
   inputLabel: string
-  /** Arguments encoded as stdin lines (JSON-serializable) */
+  /** Arguments (structured); judge emits token stdin (numbers / NULL) */
   args: JsonValue[]
-  /** Expected stdout value (parsed JSON) */
+  /** Expected stdout value (structured; compared via normalized tokens) */
   expected: JsonValue
   /** Whether this case is shown in the problem statement */
   sample?: boolean
