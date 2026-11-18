@@ -655,19 +655,9 @@ def _emit_main(fn: str, sig: str, mode: str) -> str:
 
 
 def starter(fn: str, sig: str, comment: str, mode: str = "value") -> str:
-    """Emit a full C program skeleton: helpers + solution stub + main."""
-    parts = [
-        "/* 枝径 TreePath — 请编写完整 C 程序（含 main） */",
-        "/* I/O：stdin 每参数一行；树为层序 [1,2,null,3]；stdout 一行答案 */",
-        STARTER_PREAMBLE.rstrip(),
-        "",
-        _solution_stub(fn, sig, comment, mode).rstrip(),
-        "",
-        "/* ===== main：读入测试输入并打印答案（可按需改写，但需遵守 I/O 约定） ===== */",
-        _emit_main(fn, sig, mode).rstrip(),
-        "",
-    ]
-    return "\n".join(parts)
+    """Editor starts empty — I/O / full-program rules live in the statement only."""
+    del fn, sig, comment, mode  # kept for call-site compatibility
+    return ""
 
 
 

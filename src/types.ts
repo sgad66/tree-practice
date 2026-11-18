@@ -87,7 +87,7 @@ export interface Problem {
   constraints: string[]
   /** Suggested solution function name inside the full program */
   functionName: string
-  /** Full C program skeleton (includes + TreeNode + helpers + main) */
+  /** Default editor contents — empty; users write a full program from scratch */
   starterCode: string
   /** @deprecated unused in full-program mode */
   harnessExtras?: string

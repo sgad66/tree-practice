@@ -18,7 +18,10 @@ interface Props {
   onBack: () => void
 }
 
-const draftKey = (id: string) => `tree-practice:draft:c-full:${id}`
+/** Editor starts empty; I/O rules live in the problem statement only. */
+const EMPTY_STARTER = ''
+
+const draftKey = (id: string) => `tree-practice:draft:c-blank:${id}`
 
 function difficultyClass(d: Problem['difficulty']): string {
   if (d === '简单') return 'badge badge--easy'
@@ -41,7 +44,7 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
   const firstId = initialId ?? PROBLEMS[0]?.id ?? 'preorder'
   const [activeId, setActiveId] = useState(firstId)
   const problem = useMemo(() => getProblem(activeId) ?? PROBLEMS[0], [activeId])
-  const [code, setCode] = useState(problem.starterCode)
+  const [code, setCode] = useState(EMPTY_STARTER)
   const [result, setResult] = useState<RunResult | null>(null)
   const [running, setRunning] = useState(false)
   const [toolchainReady, setToolchainReady] = useState(false)
@@ -64,7 +67,8 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
 
   useEffect(() => {
     const saved = localStorage.getItem(draftKey(problem.id))
-    setCode(saved ?? problem.starterCode)
+    // Treat whitespace-only as empty; never fall back to a prefilled template.
+    setCode(saved && saved.trim() ? saved : EMPTY_STARTER)
     setResult(null)
   }, [problem])
 
@@ -114,7 +118,8 @@ export function Workspace({ initialId, solved, onSolved, onBack }: Props) {
   })
 
   function resetCode() {
-    setCode(problem.starterCode)
+    setCode(EMPTY_STARTER)
+    localStorage.setItem(draftKey(problem.id), EMPTY_STARTER)
     setResult(null)
   }
 

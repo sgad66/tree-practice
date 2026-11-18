@@ -2,103 +2,184 @@ import puppeteer from 'puppeteer-core'
 
 const BASE = process.env.APP_URL || 'http://127.0.0.1:5173'
 
-function wrapSolution(starter, solutionFnSrc) {
-  const startMark = '/* ===== 解题区'
-  const mainMark = '/* ===== main'
-  const i = starter.indexOf(startMark)
-  const j = starter.indexOf(mainMark)
-  if (i < 0 || j < 0) throw new Error('starter missing markers')
-  return starter.slice(0, i) + solutionFnSrc.trim() + '\n\n' + starter.slice(j)
+const HELPERS = `#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <stdbool.h>
+#include <limits.h>
+struct TreeNode { int val; struct TreeNode *left; struct TreeNode *right; };
+#define TP_LINE_MAX 65536
+#define TP_NODE_MAX 4096
+static char tp_line[TP_LINE_MAX];
+static int tp_read_line(char *buf, int cap) {
+  if (!fgets(buf, cap, stdin)) { if (cap>0) buf[0]=0; return 0; }
+  size_t n=strlen(buf);
+  while (n>0 && (buf[n-1]=='\\n'||buf[n-1]=='\\r')) buf[--n]=0;
+  return 1;
 }
+static struct TreeNode *tp_new(int v) {
+  struct TreeNode *n=(struct TreeNode*)malloc(sizeof(*n));
+  n->val=v; n->left=n->right=NULL; return n;
+}
+static struct TreeNode *tp_build_tree(int *vals, int *nulls, int len) {
+  if (len<=0) return NULL;
+  struct TreeNode **nodes=(struct TreeNode**)calloc((size_t)len,sizeof(struct TreeNode*));
+  for (int i=0;i<len;i++) nodes[i]=nulls[i]?NULL:tp_new(vals[i]);
+  int kids=1;
+  for (int i=0;i<len;i++) {
+    if (!nodes[i]) continue;
+    if (kids<len) { nodes[i]->left=nodes[kids]; kids++; }
+    if (kids<len) { nodes[i]->right=nodes[kids]; kids++; }
+  }
+  struct TreeNode *root=nodes[0]; free(nodes); return root;
+}
+static struct TreeNode *tp_parse_tree(const char *s) {
+  while (*s && isspace((unsigned char)*s)) s++;
+  if (*s!='[') return NULL; s++;
+  int vals[TP_NODE_MAX], nulls[TP_NODE_MAX], n=0;
+  while (*s && *s!=']') {
+    while (*s && isspace((unsigned char)*s)) s++;
+    if (*s==']') break;
+    if (n>=TP_NODE_MAX) break;
+    if ((s[0]=='n'||s[0]=='N') && strncmp(s,"null",4)==0) { vals[n]=0; nulls[n]=1; n++; s+=4; }
+    else { char *end=NULL; vals[n]=(int)strtol(s,&end,10); nulls[n]=0; n++; s=end?end:s; }
+    while (*s && isspace((unsigned char)*s)) s++;
+    if (*s==',') s++;
+  }
+  return tp_build_tree(vals,nulls,n);
+}
+static struct TreeNode *tp_read_tree(void) {
+  if (!tp_read_line(tp_line, TP_LINE_MAX)) return NULL;
+  return tp_parse_tree(tp_line);
+}
+static void tp_print_int_array(int *a, int n) {
+  putchar('[');
+  for (int i=0;i<n;i++) { if (i) putchar(','); printf("%d", a[i]); }
+  putchar(']');
+}
+static void tp_print_int_matrix(int **a, int rows, int *cols) {
+  putchar('[');
+  for (int i=0;i<rows;i++) { if (i) putchar(','); tp_print_int_array(a?a[i]:NULL, cols?cols[i]:0); }
+  putchar(']');
+}
+`
 
 const CASES = [
   {
     label: 'basics/max-depth',
     openTitle: '二叉树的最大深度',
-    bad: `/* ===== 解题区 ===== */
+    bad: `${HELPERS}
 int maxDepth(struct TreeNode* root) {
-    if (!root) return 0;
-    int l = maxDepth(root->left), r = maxDepth(root->right);
-    return l > r ? l : r; /* missing +1 */
+  if (!root) return 0;
+  int l = maxDepth(root->left), r = maxDepth(root->right);
+  return l > r ? l : r;
+}
+int main(void) {
+  printf("%d\\n", maxDepth(tp_read_tree()));
+  return 0;
 }
 `,
-    good: `/* ===== 解题区 ===== */
+    good: `${HELPERS}
 int maxDepth(struct TreeNode* root) {
-    if (!root) return 0;
-    int l = maxDepth(root->left), r = maxDepth(root->right);
-    return 1 + (l > r ? l : r);
+  if (!root) return 0;
+  int l = maxDepth(root->left), r = maxDepth(root->right);
+  return 1 + (l > r ? l : r);
+}
+int main(void) {
+  printf("%d\\n", maxDepth(tp_read_tree()));
+  return 0;
 }
 `,
   },
   {
     label: 'bst/validate-bst',
     openTitle: '验证二叉搜索树',
-    bad: `/* ===== 解题区 ===== */
-#include <stdbool.h>
+    bad: `${HELPERS}
 bool isValidBST(struct TreeNode* root) {
-    if (!root) return true;
-    if (root->left && root->left->val >= root->val) return false;
-    if (root->right && root->right->val <= root->val) return false;
-    return isValidBST(root->left) && isValidBST(root->right);
+  if (!root) return true;
+  if (root->left && root->left->val >= root->val) return false;
+  if (root->right && root->right->val <= root->val) return false;
+  return isValidBST(root->left) && isValidBST(root->right);
+}
+int main(void) {
+  printf(isValidBST(tp_read_tree()) ? "true\\n" : "false\\n");
+  return 0;
 }
 `,
-    good: `/* ===== 解题区 ===== */
-#include <stdbool.h>
-#include <limits.h>
+    good: `${HELPERS}
 static bool ok(struct TreeNode* n, long lo, long hi) {
-    if (!n) return true;
-    if (n->val <= lo || n->val >= hi) return false;
-    return ok(n->left, lo, n->val) && ok(n->right, n->val, hi);
+  if (!n) return true;
+  if (n->val <= lo || n->val >= hi) return false;
+  return ok(n->left, lo, n->val) && ok(n->right, n->val, hi);
 }
 bool isValidBST(struct TreeNode* root) {
-    return ok(root, LONG_MIN, LONG_MAX);
+  return ok(root, LONG_MIN, LONG_MAX);
+}
+int main(void) {
+  printf(isValidBST(tp_read_tree()) ? "true\\n" : "false\\n");
+  return 0;
 }
 `,
   },
   {
     label: 'levelview/level-order',
     openTitle: '二叉树的层序遍历',
-    bad: `/* ===== 解题区 ===== */
+    bad: `${HELPERS}
 int** levelOrder(struct TreeNode* root, int* returnSize, int** returnColumnSizes) {
-    *returnSize = 0;
-    if (!root) return NULL;
-    int* row = (int*)malloc(sizeof(int));
-    row[0] = root->val;
-    int** out = (int**)malloc(sizeof(int*));
-    out[0] = row;
-    int* cols = (int*)malloc(sizeof(int));
-    cols[0] = 1;
-    *returnColumnSizes = cols;
-    *returnSize = 1;
-    return out; /* incomplete BFS */
+  *returnSize = 0;
+  if (!root) return NULL;
+  int* row = (int*)malloc(sizeof(int));
+  row[0] = root->val;
+  int** out = (int**)malloc(sizeof(int*));
+  out[0] = row;
+  int* cols = (int*)malloc(sizeof(int));
+  cols[0] = 1;
+  *returnColumnSizes = cols;
+  *returnSize = 1;
+  return out;
+}
+int main(void) {
+  int rs=0; int* cols=NULL;
+  int** res = levelOrder(tp_read_tree(), &rs, &cols);
+  tp_print_int_matrix(res, rs, cols);
+  putchar('\\n');
+  return 0;
 }
 `,
-    good: `/* ===== 解题区 ===== */
+    good: `${HELPERS}
 int** levelOrder(struct TreeNode* root, int* returnSize, int** returnColumnSizes) {
-    *returnSize = 0;
-    if (!root) return NULL;
-    struct TreeNode* q[256];
-    int qh = 0, qt = 0;
-    q[qt++] = root;
-    int** res = (int**)malloc(sizeof(int*) * 64);
-    int* cols = (int*)malloc(sizeof(int) * 64);
-    int rows = 0;
-    while (qh < qt) {
-        int sz = qt - qh;
-        int* lv = (int*)malloc(sizeof(int) * (size_t)sz);
-        for (int i = 0; i < sz; i++) {
-            struct TreeNode* n = q[qh++];
-            lv[i] = n->val;
-            if (n->left) q[qt++] = n->left;
-            if (n->right) q[qt++] = n->right;
-        }
-        res[rows] = lv;
-        cols[rows] = sz;
-        rows++;
+  *returnSize = 0;
+  if (!root) return NULL;
+  struct TreeNode* q[256];
+  int qh = 0, qt = 0;
+  q[qt++] = root;
+  int** res = (int**)malloc(sizeof(int*) * 64);
+  int* cols = (int*)malloc(sizeof(int) * 64);
+  int rows = 0;
+  while (qh < qt) {
+    int sz = qt - qh;
+    int* lv = (int*)malloc(sizeof(int) * (size_t)sz);
+    for (int i = 0; i < sz; i++) {
+      struct TreeNode* n = q[qh++];
+      lv[i] = n->val;
+      if (n->left) q[qt++] = n->left;
+      if (n->right) q[qt++] = n->right;
     }
-    *returnColumnSizes = cols;
-    *returnSize = rows;
-    return res;
+    res[rows] = lv;
+    cols[rows] = sz;
+    rows++;
+  }
+  *returnColumnSizes = cols;
+  *returnSize = rows;
+  return res;
+}
+int main(void) {
+  int rs=0; int* cols=NULL;
+  int** res = levelOrder(tp_read_tree(), &rs, &cols);
+  tp_print_int_matrix(res, rs, cols);
+  putchar('\\n');
+  return 0;
 }
 `,
   },
@@ -114,18 +195,6 @@ const page = await browser.newPage()
 page.setDefaultTimeout(600000)
 await page.goto(BASE, { waitUntil: 'networkidle2' })
 
-const landingText = await page.evaluate(() => document.body.innerText)
-if (!landingText.includes('100 题') && !/100/.test(landingText)) {
-  console.error('Landing does not show 100 problems:', landingText.slice(0, 400))
-  process.exitCode = 1
-} else {
-  console.log('landing shows 100')
-}
-if (!/完整 C 程序|含 main/.test(landingText)) {
-  console.error('Landing missing full-program messaging')
-  process.exitCode = 1
-}
-
 await page.click('button.btn--primary')
 await page.waitForFunction(
   () => document.body.innerText.includes('C 工具链就绪'),
@@ -133,9 +202,15 @@ await page.waitForFunction(
 )
 await page.waitForFunction(() => window.__treePractice, { timeout: 30000 })
 
-const sidebarCount = await page.evaluate(() => {
-  return document.querySelectorAll('.problem-link').length
-})
+const initial = await page.evaluate(() => window.__treePractice.getCode())
+if (initial.trim() !== '') {
+  console.error('FAIL: editor should start empty')
+  process.exitCode = 1
+} else {
+  console.log('editor starts empty')
+}
+
+const sidebarCount = await page.evaluate(() => document.querySelectorAll('.problem-link').length)
 console.log('sidebar problem links', sidebarCount)
 if (sidebarCount !== 100) {
   console.error('Expected 100 problem links')
@@ -160,26 +235,25 @@ async function openByTitle(title) {
 
 for (const c of CASES) {
   await openByTitle(c.openTitle)
-  const starter = await page.evaluate(() => window.__treePractice.getCode())
-  if (!starter.includes('int main')) {
-    console.error('FAIL: starter missing main', c.label)
+  const code = await page.evaluate(() => window.__treePractice.getCode())
+  if (code.trim() !== '') {
+    console.error('FAIL: editor not empty after switch', c.label, code.length)
     process.exitCode = 1
-    continue
   }
   await page.evaluate(async (src) => {
     await window.__treePractice.submit(src)
-  }, wrapSolution(starter, c.bad))
+  }, c.bad)
   let result = await page.evaluate(() => window.__treePractice.getResult())
-  console.log(c.label, 'bad ok?', result?.ok, 'passed', result?.passedCount, result?.compileError?.slice?.(0, 120))
+  console.log(c.label, 'bad ok?', result?.ok, 'passed', result?.passedCount)
   if (result?.ok) {
     console.error('FAIL: bad should not pass', c.label)
     process.exitCode = 1
   }
   await page.evaluate(async (src) => {
     await window.__treePractice.submit(src)
-  }, wrapSolution(starter, c.good))
+  }, c.good)
   result = await page.evaluate(() => window.__treePractice.getResult())
-  console.log(c.label, 'good ok?', result?.ok, 'passed', result?.passedCount, result?.compileError?.slice?.(0, 200))
+  console.log(c.label, 'good ok?', result?.ok, 'passed', result?.passedCount, result?.compileError?.slice?.(0, 160))
   if (!result?.ok) {
     console.error('FAIL: good should pass', c.label, result)
     process.exitCode = 1

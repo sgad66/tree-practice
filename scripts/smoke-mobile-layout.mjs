@@ -83,7 +83,13 @@ const metrics = await page.evaluate(() => {
     hasCallout: !!document.querySelector('.statement__io-callout'),
   }
 })
+const editorCode = await page.evaluate(() => window.__treePractice?.getCode?.() ?? '')
 console.log('metrics', JSON.stringify(metrics, null, 2))
+console.log('editorCodeLen', editorCode.length)
+if (editorCode.trim() !== '') {
+  console.error('FAIL: editor should start empty on mobile', editorCode.slice(0, 80))
+  process.exitCode = 1
+}
 
 // Scroll page so editor is in view
 await page.evaluate(() => {
