@@ -15,6 +15,14 @@ import { PROBLEMS_HASH } from './categories/hash'
 import { PROBLEMS_HEAP } from './categories/heap'
 import { PROBLEMS_GRAPH } from './categories/graph'
 import { PROBLEMS_SORTING } from './categories/sorting'
+import { PROBLEMS_SA_INTRO } from './categories/sa_intro'
+import { PROBLEMS_SA_ANALYSIS } from './categories/sa_analysis'
+import { PROBLEMS_SA_LINEAR } from './categories/sa_linear'
+import { PROBLEMS_SA_STACKQ } from './categories/sa_stackq'
+import { PROBLEMS_SA_STRING } from './categories/sa_string'
+import { PROBLEMS_SA_TREE } from './categories/sa_tree'
+import { PROBLEMS_SA_GRAPH } from './categories/sa_graph'
+import { PROBLEMS_SA_PARAMS } from './categories/sa_params'
 
 export const TOPICS: Topic[] = [
   { id: 'traversal', name: "树·遍历与序列", blurb: "前序 / 中序 / 后序与序列巩固" },
@@ -33,6 +41,14 @@ export const TOPICS: Topic[] = [
   { id: 'heap', name: "堆与优先队列", blurb: "Top-K、多路归并、调度" },
   { id: 'graph', name: "图论基础", blurb: "BFS/DFS、最短路、连通性、网格" },
   { id: 'sorting', name: "排序与查找", blurb: "二分、区间、基础排序" },
+  { id: 'sa_intro', name: "课·导论与ADT", blurb: "对齐 CH0/CH1：查找、索引、ADT 语义" },
+  { id: 'sa_analysis', name: "课·算法分析", blurb: "对齐 CH2：渐近阶、步数、最大子段和" },
+  { id: 'sa_linear', name: "课·线性表", blurb: "对齐 CH3：顺序表/链表/游标/双向" },
+  { id: 'sa_stackq', name: "课·栈与队列", blurb: "对齐 CH4：括号、后缀、循环队列" },
+  { id: 'sa_string', name: "课·串与匹配", blurb: "对齐 CH5：基本运算、朴素/KMP" },
+  { id: 'sa_tree', name: "课·树与查找树", blurb: "对齐 CH6：完全树、BST、AVL、Huffman" },
+  { id: 'sa_graph', name: "课·图算法", blurb: "对齐 CH7：拓扑、Dijkstra、MST" },
+  { id: 'sa_params', name: "课·引用与传参", blurb: "对齐《引用和参数传递》" },
 ]
 
 export const PROBLEMS: Problem[] = [
@@ -52,6 +68,14 @@ export const PROBLEMS: Problem[] = [
   ...PROBLEMS_HEAP,
   ...PROBLEMS_GRAPH,
   ...PROBLEMS_SORTING,
+  ...PROBLEMS_SA_INTRO,
+  ...PROBLEMS_SA_ANALYSIS,
+  ...PROBLEMS_SA_LINEAR,
+  ...PROBLEMS_SA_STACKQ,
+  ...PROBLEMS_SA_STRING,
+  ...PROBLEMS_SA_TREE,
+  ...PROBLEMS_SA_GRAPH,
+  ...PROBLEMS_SA_PARAMS,
 ]
 
 export function getProblem(id: string): Problem | undefined {
