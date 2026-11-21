@@ -4030,6 +4030,9 @@ def extend_catalog(C: list[ProblemDef]) -> list[ProblemDef]:
     ]
 
     C += add_ds_problems(P, T)
+    from course_extra import add_course_problems
+
+    C += add_course_problems(P, T)
     return C
 
 
@@ -4124,6 +4127,14 @@ TOPICS = [
     ("heap", "堆与优先队列", "Top-K、多路归并、调度"),
     ("graph", "图论基础", "BFS/DFS、最短路、连通性、网格"),
     ("sorting", "排序与查找", "二分、区间、基础排序"),
+    ("sa_intro", "课·导论与ADT", "对齐 CH0/CH1：查找、索引、ADT 语义"),
+    ("sa_analysis", "课·算法分析", "对齐 CH2：渐近阶、步数、最大子段和"),
+    ("sa_linear", "课·线性表", "对齐 CH3：顺序表/链表/游标/双向"),
+    ("sa_stackq", "课·栈与队列", "对齐 CH4：括号、后缀、循环队列"),
+    ("sa_string", "课·串与匹配", "对齐 CH5：基本运算、朴素/KMP"),
+    ("sa_tree", "课·树与查找树", "对齐 CH6：完全树、BST、AVL、Huffman"),
+    ("sa_graph", "课·图算法", "对齐 CH7：拓扑、Dijkstra、MST"),
+    ("sa_params", "课·引用与传参", "对齐《引用和参数传递》"),
 ]
 
 

@@ -17,6 +17,14 @@ export type TopicId =
   | 'heap'
   | 'graph'
   | 'sorting'
+  | 'sa_intro'
+  | 'sa_analysis'
+  | 'sa_linear'
+  | 'sa_stackq'
+  | 'sa_string'
+  | 'sa_tree'
+  | 'sa_graph'
+  | 'sa_params'
 
 /**
  * How stdin args are interpreted / expected stdout is shaped.

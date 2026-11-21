@@ -24,8 +24,8 @@ export function Landing({ solvedCount, onEnter }: Props) {
           枝径
         </h1>
         <p className="hero__lede">
-          {PROBLEMS.length} 道数据结构练习题：树专题之外还有数组、栈队列、链表、哈希、堆、图与排序查找。
-          浏览器内编写完整 C 程序（含 main），输入仅用数字与 NULL，提交即见失败用例与提示。
+          {PROBLEMS.length} 道题：树与通用数据结构之外，新增对齐《结构分析》课件的章节练习（算法分析、线性表、栈队列、串、树、图、传参）。
+          浏览器内编写完整 C 程序（含 main），输入仅用数字与 NULL。
         </p>
         <div className="hero__actions">
           <button type="button" className="btn btn--primary" onClick={onEnter}>
