@@ -2882,6 +2882,15 @@ def build_catalog() -> list[ProblemDef]:
 
 
 def extend_catalog(C: list[ProblemDef]) -> list[ProblemDef]:
+    # Import lazily so this file remains runnable as a script.
+    import sys
+    from pathlib import Path as _Path
+
+    _scripts = str(_Path(__file__).resolve().parent)
+    if _scripts not in sys.path:
+        sys.path.insert(0, _scripts)
+    from ds_extra import add_ds_problems
+
     # ========== 4. BST (13) ==========
     C += [
         P(
@@ -4020,6 +4029,7 @@ def extend_catalog(C: list[ProblemDef]) -> list[ProblemDef]:
         ),
     ]
 
+    C += add_ds_problems(P, T)
     return C
 
 
@@ -4098,14 +4108,22 @@ def materialize(prob: ProblemDef) -> dict:
 
 
 TOPICS = [
-    ("traversal", "遍历与序列", "前序 / 中序 / 后序与序列巩固"),
-    ("basics", "二叉树基础属性", "深度、对称、翻转、合并等"),
-    ("path", "路径与递归", "路径和、好节点、祖先差等"),
-    ("bst", "二叉搜索树 BST", "验证、搜索、插入删除、第 K 等"),
-    ("construct", "构造与序列化", "由遍历还原、编解码、展开"),
-    ("lca", "最近公共祖先与祖先关系", "LCA、距离、方向、堂兄弟"),
-    ("levelview", "层序与视图", "层序、锯齿、左右视图、垂直"),
-    ("advanced", "进阶 / 综合", "最大路径和、树 DP、翻转等价等"),
+    ("traversal", "树·遍历与序列", "前序 / 中序 / 后序与序列巩固"),
+    ("basics", "树·基础属性", "深度、对称、翻转、合并等"),
+    ("path", "树·路径与递归", "路径和、好节点、祖先差等"),
+    ("bst", "树·二叉搜索树", "验证、搜索、插入删除、第 K、平衡"),
+    ("construct", "树·构造与序列化", "由遍历还原、编解码、展开"),
+    ("lca", "树·最近公共祖先", "LCA、距离、方向、堂兄弟"),
+    ("levelview", "树·层序与视图", "层序、锯齿、左右视图、垂直"),
+    ("advanced", "树·进阶综合", "最大路径和、树 DP、翻转等价等"),
+    ("arrays", "数组与列表", "双指针、前缀、原地修改、经典扫描"),
+    ("stack", "栈", "括号、单调栈、表达式与直方图"),
+    ("queue", "队列", "滑窗、模拟、循环队列与调度"),
+    ("linkedlist", "链表", "反转、合并、环、双指针技巧"),
+    ("hash", "哈希表", "计数、前缀和、映射与去重"),
+    ("heap", "堆与优先队列", "Top-K、多路归并、调度"),
+    ("graph", "图论基础", "BFS/DFS、最短路、连通性、网格"),
+    ("sorting", "排序与查找", "二分、区间、基础排序"),
 ]
 
 
@@ -4161,8 +4179,11 @@ def main():
     for tid, name, _ in TOPICS:
         print(f"  {tid} ({name}): {len(by_topic[tid])}")
     print("total", total)
-    if total != 100:
-        raise SystemExit(f"expected 100 problems, got {total}")
+    if total < 100:
+        raise SystemExit(f"expected at least 100 problems, got {total}")
+    orphan = [p["id"] for p in materialized if p["topic"] not in by_topic]
+    if orphan:
+        raise SystemExit(f"problems with unknown topic: {orphan[:5]}")
 
     cat_dir = OUT / "categories"
     cat_dir.mkdir(parents=True, exist_ok=True)
