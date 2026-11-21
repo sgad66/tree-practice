@@ -24,8 +24,8 @@ export function Landing({ solvedCount, onEnter }: Props) {
           枝径
         </h1>
         <p className="hero__lede">
-          一百道二叉树专项题，按八大分类练习：遍历、基础属性、路径、BST、构造、
-          LCA、层序视图与进阶综合。浏览器内编写完整 C 程序（含 main），提交即见失败用例与提示。
+          {PROBLEMS.length} 道数据结构练习题：树专题之外还有数组、栈队列、链表、哈希、堆、图与排序查找。
+          浏览器内编写完整 C 程序（含 main），输入仅用数字与 NULL，提交即见失败用例与提示。
         </p>
         <div className="hero__actions">
           <button type="button" className="btn btn--primary" onClick={onEnter}>

@@ -9,6 +9,14 @@ export type TopicId =
   | 'lca'
   | 'levelview'
   | 'advanced'
+  | 'arrays'
+  | 'stack'
+  | 'queue'
+  | 'linkedlist'
+  | 'hash'
+  | 'heap'
+  | 'graph'
+  | 'sorting'
 
 /**
  * How stdin args are interpreted / expected stdout is shaped.
